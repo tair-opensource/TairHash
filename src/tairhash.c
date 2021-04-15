@@ -58,8 +58,6 @@ static RedisModuleType *TairHashType;
 #define EX_HASH_SET_WITH_VER (1 << 5)
 #define EX_HASH_SET_WITH_ABS_VER (1 << 6)
 #define EX_HASH_SET_WITH_BOUNDARY (1 << 7)
-#define EX_HASH_SET_WITH_NOACTIVE (1 << 8)
-#define EX_HASH_SET_WITH_TRYPASSIVE (1 << 9)
 
 #define UNIT_SECONDS 0
 #define UNIT_MILLISECONDS 1
@@ -533,8 +531,6 @@ int exhashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int a
                 ex_flags |= EX_HASH_SET_WITH_ABS_VER;
                 version_p = next;
                 j++;
-            } else if (!rsStrcasecmp(argv[j], "noactive")) {
-                ex_flags |= EX_HASH_SET_WITH_NOACTIVE;
             } else {
                 RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
                 return REDISMODULE_ERR;
@@ -592,7 +588,7 @@ int exhashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int a
         milliseconds += basetime;
         ex_hash_val->expire = milliseconds;
         if (milliseconds > 0) {
-            if (!(ex_flags & EX_HASH_SET_WITH_NOACTIVE)) EXPIRE_NODE_INSERT(argv[1], argv[2])
+            EXPIRE_NODE_INSERT(argv[1], argv[2])
         }
         RedisModule_ReplyWithLongLong(ctx, 1);
     }
@@ -677,8 +673,7 @@ int mstring2ld(RedisModuleString *val, long double *r_val) {
 }
 
 /* ========================= "exhash" type commands ======================= */
-/* EXHSET <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [NX|XX] [VER version | ABS version] [
- * NOACTIVE ] [ WITHPE ] */
+/* EXHSET <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [NX|XX] [VER version | ABS version] */
 int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     RedisModule_AutoMemory(ctx);
 
@@ -737,10 +732,6 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
             ex_flags |= EX_HASH_SET_WITH_ABS_VER;
             version_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "noactive") && (ex_flags & EX_HASH_SET_PX || ex_flags & EX_HASH_SET_EX)) {
-            ex_flags |= EX_HASH_SET_WITH_NOACTIVE;
-        } else if (!rsStrcasecmp(argv[j], "withpe")) {
-            ex_flags |= EX_HASH_SET_WITH_TRYPASSIVE;
         } else {
             RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
             return REDISMODULE_ERR;
@@ -767,10 +758,8 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         return REDISMODULE_ERR;
     }
 
-    if (ex_flags & EX_HASH_SET_WITH_TRYPASSIVE) {
-        latencySensitivePassiveExpire(ctx, RedisModule_GetSelectedDb(ctx));
-    }
-
+    latencySensitivePassiveExpire(ctx, RedisModule_GetSelectedDb(ctx));
+    
     exHashObj *ex_hash_obj = NULL;
     if (type == REDISMODULE_KEYTYPE_EMPTY) {
         if (ex_flags & EX_HASH_SET_XX) {
@@ -837,7 +826,7 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
 
     ex_hash_val->expire = milliseconds;
     if (milliseconds > 0) {
-        if (!(ex_flags & EX_HASH_SET_WITH_NOACTIVE)) EXPIRE_NODE_INSERT(argv[1], argv[2])
+        EXPIRE_NODE_INSERT(argv[1], argv[2])
     }
 
     if (!nokey && ex_hash_val->value) {
@@ -1080,22 +1069,22 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
     return REDISMODULE_OK;
 }
 
-/*  EXHPEXPIREAT <key> <field> <milliseconds-timestamp> [ VER version | ABS version ] [ NOACTIVE ]*/
+/*  EXHPEXPIREAT <key> <field> <milliseconds-timestamp> [ VER version | ABS version ]*/
 int TairHashTypeHpexpireAt_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     return exhashExpireGenericFunc(ctx, argv, argc, 0, UNIT_MILLISECONDS);
 }
 
-/*  EXHPEXPIRE <key> <field> <milliseconds> [ VER version | ABS version ] [ NOACTIVE ]*/
+/*  EXHPEXPIRE <key> <field> <milliseconds> [ VER version | ABS version ]*/
 int TairHashTypeHpexpire_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     return exhashExpireGenericFunc(ctx, argv, argc, mstime(), UNIT_MILLISECONDS);
 }
 
-/*  EXHEXPIREAT <key> <field> <timestamp> [ VER version | ABS version ] [ NOACTIVE ]*/
+/*  EXHEXPIREAT <key> <field> <timestamp> [ VER version | ABS version ] */
 int TairHashTypeHexpireAt_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     return exhashExpireGenericFunc(ctx, argv, argc, 0, UNIT_SECONDS);
 }
 
-/*  EXHEXPIRE <key> <field> <seconds> [ VER version | ABS version ] [ NOACTIVE ]*/
+/*  EXHEXPIRE <key> <field> <seconds> [ VER version | ABS version ] */
 int TairHashTypeHexpire_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     return exhashExpireGenericFunc(ctx, argv, argc, mstime(), UNIT_SECONDS);
 }
@@ -1222,8 +1211,7 @@ int TairHashTypeHsetVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     return REDISMODULE_OK;
 }
 
-/* EXHINCRBY <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER version | ABS version] [MIN minval]
- * [MAX maxval] [NOACTIVE] [ WITHPE ] */
+/* EXHINCRBY <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER version | ABS version] [MIN minval] [MAX maxval]  */
 int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     RedisModule_AutoMemory(ctx);
 
@@ -1292,10 +1280,6 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
             ex_flags |= EX_HASH_SET_WITH_BOUNDARY;
             max_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "noactive") && (ex_flags & EX_HASH_SET_PX || ex_flags & EX_HASH_SET_EX)) {
-            ex_flags |= EX_HASH_SET_WITH_NOACTIVE;
-        } else if (!rsStrcasecmp(argv[j], "withpe")) {
-            ex_flags |= EX_HASH_SET_WITH_TRYPASSIVE;
         } else {
             RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
             return REDISMODULE_ERR;
@@ -1337,10 +1321,9 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         return REDISMODULE_ERR;
     }
 
-    if (ex_flags & EX_HASH_SET_WITH_TRYPASSIVE) {
-        latencySensitivePassiveExpire(ctx, RedisModule_GetSelectedDb(ctx));
-    }
 
+    latencySensitivePassiveExpire(ctx, RedisModule_GetSelectedDb(ctx));
+    
     exHashObj *ex_hash_obj = NULL;
     if (type == REDISMODULE_KEYTYPE_EMPTY) {
         ex_hash_obj = createExhashTypeObject();
@@ -1418,7 +1401,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
 
     ex_hash_val->expire = milliseconds;
     if (milliseconds > 0) {
-        if (!(ex_flags & EX_HASH_SET_WITH_NOACTIVE)) EXPIRE_NODE_INSERT(argv[1], argv[2])
+        EXPIRE_NODE_INSERT(argv[1], argv[2])
     }
 
     if (nokey) {
@@ -1431,7 +1414,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
 }
 
 /* EXHINCRBYFLOAT <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER version | ABS version] [MIN
- * minval] [MAX maxval] [NOACTIVE] */
+ * minval] [MAX maxval] */
 int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     RedisModule_AutoMemory(ctx);
 
@@ -1501,10 +1484,6 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
             ex_flags |= EX_HASH_SET_WITH_BOUNDARY;
             max_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "noactive") && (ex_flags & EX_HASH_SET_PX || ex_flags & EX_HASH_SET_EX)) {
-            ex_flags |= EX_HASH_SET_WITH_NOACTIVE;
-        } else if (!rsStrcasecmp(argv[j], "withpe")) {
-            ex_flags |= EX_HASH_SET_WITH_TRYPASSIVE;
         } else {
             RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
             return REDISMODULE_ERR;
@@ -1544,10 +1523,6 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
     if (NULL != min_p && NULL != max_p && max < min) {
         RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_MIN_MAX);
         return REDISMODULE_ERR;
-    }
-
-    if (ex_flags & EX_HASH_SET_WITH_TRYPASSIVE) {
-        latencySensitivePassiveExpire(ctx, RedisModule_GetSelectedDb(ctx));
     }
 
     exHashObj *ex_hash_obj = NULL;
@@ -1634,7 +1609,7 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
 
     ex_hash_val->expire = milliseconds;
     if (milliseconds > 0) {
-        if (!(ex_flags & EX_HASH_SET_WITH_NOACTIVE)) EXPIRE_NODE_INSERT(argv[1], argv[2])
+        EXPIRE_NODE_INSERT(argv[1], argv[2])
     }
 
     if (nokey) {

@@ -155,81 +155,6 @@ start_server {tags {"ex_hash"} overrides {bind 0.0.0.0} } {
         r exh_debug_set_enable_active_expire 0
     }
 
-    test {Exhset/exhget EX/EXAT/PX/PXAT with noactive option } {
-        r del exhashkey
-        r exh_debug_set_enable_active_expire 1
-
-        assert_equal 1 [r exhset exhashkey field val EX 1]
-        after 2000
-        assert_equal 0 [r exhlen exhashkey]
-
-        catch {r exhset exhashkey field val noactive} err
-        assert_match {*ERR*syntax*error*} $err
-
-        catch {r exhset exhashkey field val EX 1 xxxx} err
-        assert_match {*ERR*syntax*error*} $err
-
-        assert_equal 1 [r exhset exhashkey field val EX 1 noactive]
-        after 2000
-        assert_equal 1 [r exhlen exhashkey]
-        assert_equal 0 [r exhlen exhashkey noexp]
-
-        r exh_debug_set_enable_active_expire 0
-    }
-
-    test {Exhset EX/EXAT/PX/PXAT with trypassive option } {
-        r del exhashkey
-        r exh_debug_set_enable_active_expire 1
-        r exh_debug_set_ex_hash_active_expire_keys_per_loop 1
-
-        set elements 10000
-        for {set j 0} {$j < $elements} {incr j} {
-            r exhset exhashkey will_passive_$j $j ex 1
-        }
-
-        after 2000
-
-        for {set j 0} {$j < $elements} {incr j} {
-            r exhset exhashkey noexpire_$j $j withpe
-        }
-
-        assert_equal $elements [r exhlen exhashkey noexp]
-        assert_equal $elements [r exhlen exhashkey]
-
-        r del exhashkey
-
-        for {set j 0} {$j < $elements} {incr j} {
-            r exhincrby exhashkey will_passive_$j $j ex 1
-        }
-
-        after 2000
-
-        for {set j 0} {$j < $elements} {incr j} {
-            r exhincrby exhashkey noexpire_$j $j withpe
-        }
-
-        assert_equal $elements [r exhlen exhashkey noexp]
-        assert_equal $elements [r exhlen exhashkey]
-
-        r del exhashkey
-
-        for {set j 0} {$j < $elements} {incr j} {
-            r exhincrbyfloat exhashkey will_passive_$j $j ex 1
-        }
-
-        after 2000
-
-        for {set j 0} {$j < $elements} {incr j} {
-            r exhincrbyfloat exhashkey noexpire_$j $j withpe
-        }
-
-        assert_equal $elements [r exhlen exhashkey noexp]
-        assert_equal $elements [r exhlen exhashkey]
-
-        r exh_debug_set_enable_active_expire 0
-        r exh_debug_set_ex_hash_active_expire_keys_per_loop 1000
-    }
-
     test {Exhset/exhget EX/EXAT/PX/PXAT with same time } {
         r del exhashkey
         r exh_debug_set_enable_active_expire 1
@@ -247,41 +172,6 @@ start_server {tags {"ex_hash"} overrides {bind 0.0.0.0} } {
         assert_equal 3 [r exhlen exhashkey]
         after 4000
         assert_equal 0 [r exhlen exhashkey]
-        r exh_debug_set_enable_active_expire 0
-    }
-
-    test {expire with noactive option } {
-        r del exhashkey
-        r exh_debug_set_enable_active_expire 1
-
-        assert_equal 1 [r exhset exhashkey field val]
-        assert_equal 1 [r exhexpire exhashkey field 1]
-        after 2000
-        assert_equal 0 [r exhlen exhashkey]
-
-        catch {r exhexpire exhashkey field 1 xxxx} err
-        assert_match {*ERR*syntax*error*} $err
-
-        assert_equal 1 [r exhset exhashkey field val]
-        assert_equal 1 [r exhexpire exhashkey field 1 noactive]
-        after 2000
-        assert_equal 1 [r exhlen exhashkey]
-        assert_equal 0 [r exhlen exhashkey noexp]
-        r exh_debug_set_enable_active_expire 0
-    }
-
-    test {Exhset/exhget EX/EXAT/PX/PXAT with noactive option } {
-        r del exhashkey
-        r exh_debug_set_enable_active_expire 1
-
-        assert_equal 1 [r exhset exhashkey field val EX 1]
-        after 2000
-        assert_equal 0 [r exhlen exhashkey]
-
-        assert_equal 1 [r exhset exhashkey field val EX 1 noactive]
-        after 2000
-        assert_equal 1 [r exhlen exhashkey]
-        assert_equal 0 [r exhlen exhashkey noexp]
         r exh_debug_set_enable_active_expire 0
     }
 
@@ -883,11 +773,6 @@ start_server {tags {"ex_hash"} overrides {bind 0.0.0.0} } {
         after 4000
         assert_equal 0 [r exhlen exhashkey]
 
-        assert_equal 1 [r exhincrby exhashkey field 1 EX 2 noactive]
-        assert_equal 1 [r exhlen exhashkey]
-        after 4000
-        assert_equal 1 [r exhlen exhashkey]
-        assert_equal 0 [r exhlen exhashkey noexp]
         r exh_debug_set_enable_active_expire 0
     }
 
@@ -933,11 +818,6 @@ start_server {tags {"ex_hash"} overrides {bind 0.0.0.0} } {
         after 4000
         assert_equal 0 [r exhlen exhashkey]
 
-        assert_equal 1 [r exhincrbyfloat exhashkey field 1 EX 2 noactive]
-        assert_equal 1 [r exhlen exhashkey]
-        after 4000
-        assert_equal 1 [r exhlen exhashkey]
-        assert_equal 0 [r exhlen exhashkey noexp]
         r exh_debug_set_enable_active_expire 0
     }
 

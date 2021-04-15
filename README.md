@@ -1,23 +1,23 @@
-# TairHash: field带有过期时间和版本的hash数据结构
+# TairHash
+## Introduction  [中文说明](README-CN.md)
+     TairHash is a hash data structure developed based on the redis module. TairHash not only has the same rich data interface and high performance as the native hash, but also can set the expiration and version for the field. TairHash provides an active expiration mechanism, even if the field is not accessed after expiration, it can be actively deleted to release the memory.
 
-     TairHash是基于redis module开发的一种hash数据结构，和redis原生的hash数据结构相比，TairHash不但和原生hash一样具有丰富的数据接口和高性能，还可以为field设置过期时间和版本，这极大的提高了hash数据结构的灵活性，在很多场景下可以大大的简化业务开发。TairHash提供active expire机制，即使field在过期后没有被访问也可以被主动删除，释放内存。
 
+The main features：
 
-主要的特性如下：
-
-- field支持单独设置expire和version
-- 针对field支持active expire和passivity expire
-- 语法和原生hash数据类型类似
+- Field supports setting expire and version
+- Support active expire and passivity expire on the field
+- The cmd is similar to the native hash data type
 
 
 <br/>
 
-同时，我们还开源了一个增强型的string结构，它可以给value设置版本号并支持memcached语义，具体可参见[这里](https://github.com/alibaba/TairString)
+At the same time, we also open sourced an enhanced string structure, which can set the version number for value and support memcached semantics. For details, please refer to [here](https://github.com/alibaba/TairString)
 
 <br/>
 
 
-## 快速开始
+## Quick Start
 
 ```go
 127.0.0.1:6379> EXHSET exhashkey f v ex 10
@@ -61,881 +61,823 @@ OK
 (integer) 2
 ```
 
-## 命令介绍
-
-### 命令总览
-| 命令 | 语法 | 含义 |
-| --- | --- | --- |
-| EXHSET | EXHSET <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS version] [NOACTIVE] [WITHPE] | 向key指定的TairHash中插入一个field，如果TairHash不存在则自动创建一个，如果field已经存在则覆盖其值。在插入的时候，可以使用EX/EXAT/PX/PXAT给field设置过期时间，当field过期后会被主动（active expire）或被动（passivity expire）删除掉，但是当同时指定了NOACTIVE选项时，该field在过期后不会被active expire释放内存，只有客户端再次访问这个field时，引擎才会将其删除。如果指定了NX选项，则只有在field不存在的时候才会插入成功，同理，如果指定了XX选项，则只有在field存在的时候才能插入成功。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以插入成功，如果field不存在或者field当前版本为0则不进行检查，总是可以插入成功。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功, ABS指定的版本号不能为0。该命令会触发对该field的被动淘汰检查，同时，如果带有WITHPE选项，该命令不但会检查本命令所携带的field是否过期，还会去检查其他field是否过期，每次最多淘汰三个其他field。 || EXHSETNX | EXHSETNX <key> <field> <value> | 向key指定的TairHash中插入一个field，前提是这个field必须不存在，否则插入失败 |
-| EXHMSET | EXHMSET <key> <field> <value> [field value...] | 同时向key指定的TairHash中插入多个field，如果TairHash不存在则自动创建一个，如果field已经存在则覆盖其值。该命令会触发对field的被动淘汰检查 |
-| EXHMSETWITHOPTS | EXHMSETWITHOPTS exhashkey field1 val1 ver1 expire1 [field2 val2 ver2 expire2 ...] | 同时执行多个field的插入操作，同时每个field必须携带版本和过期时间两个参数。该命令会触发对field的被动淘汰检查。expire格式同EXHSET的EX，为相对时间。设置为0是永不过期 |
-| EXHPEXPIREAT | EXHPEXPIREAT <key> <field> <milliseconds-timestamp> [VER/ABS version] [NOACTIVE ] | 在key指定的TairHash中为一个field设置绝对过期时间，单位为毫秒。当过期时间到时，该field会被主动删除，但是当同时指定了NOACTIVE选项时，该field在过期后不会被active expire释放内存，只有客户端再次访问这个field时，引擎才会将其删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，注意版本号不能为0。该命令会触发对field的被动淘汰检查 |
-| EXHPEXPIRE | EXHPEXPIRE <key> <field> <milliseconds> [VER/ABS version] [NOACTIVE ] | 在key指定的TairHash中为一个field设置相对过期时间，单位为毫秒。当过期时间到时，该field会被主动删除，但是当同时指定了NOACTIVE选项时，该field在过期后不会被active expire释放内存，只有客户端再次访问这个field时，引擎才会将其删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，注意版本号不能为0。该命令会触发对field的被动淘汰 |
-| EXHEXPIREAT | EXHEXPIREAT <key> <field> <timestamp> [VER/ABS version] [NOACTIVE ] | 在key指定的TairHash中为一个field设置绝对过期时间，单位为秒，当过期时间到时，该field会被主动删除，但是当同时指定了NOACTIVE选项时，该field在过期后不会被active expire释放内存，只有客户端再次访问这个field时，引擎才会将其删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，注意版本号不能为0。该命令会触发对field的被动淘汰 |
-| EXHEXPIRE | EXHEXPIRE <key> <field> <seconds> [VER/ABS version] [NOACTIVE ] | 在key指定的TairHash中为一个field设置相对过期时间，单位为秒，当过期时间到时，该field会被主动删除，但是当同时指定了NOACTIVE选项时，该field在过期后不会被active expire释放内存，只有客户端再次访问这个field时，引擎才会将其删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，注意版本号不能为0。该命令会触发对field的被动淘汰 || EXHPTTL | EXHPTTL <key> <field> |查看key指定的TairHash中一个field的剩余过期时间，单位为毫秒。该命令会触发对field的被动淘汰检查 || EXHTTL | EXHTTL <key> <field> |查看key指定的TairHash中一个field的剩余过期时间，单位为秒。该命令会触发对field的被动淘汰检查 || EXHVER | EXHVER <key> <field> | 查看key指定的TairHash中一个field的当前版本号。该命令会触发对field的被动淘汰。该命令会触发对field的被动淘汰检查 || EXHSETVER | EXHSETVER <key> <field> <version> | 设置key指定的TairHash中一个field的版本号,该版本号不能为0。该命令会触发对field的被动淘汰检查 || EXHINCRBY | EXHINCRBY <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [NOACTIVE] |将key指定的TairHash中一个field的值加上整数value。如果TairHash不存在则自动新创建一个，如果指定的field不存在，则在加之前先将field的值初始化为0。同时还可以使用EX/EXAT/PX/PXAT为field设置过期时间。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以设置成功，同时将field当前版本号设置为ABS指定的版本号，注意ABS指定的版本号不能为0。MIN/MAX用户给field提供一个边界，只有本次incr操作后field的值还在此边界时incr才会被执行，否则返回overflow的错误。该命令会触发对field的被动淘汰检查 || EXHINCRBYFLOAT | EXHINCRBYFLOAT <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [NOACTIVE] | 将key指定的TairHash中一个field的值加上浮点型value。如果TairHash不存在则自动新创建一个，如果指定的field不存在，则在加之前先将field的值初始化为0。同时还可以使用EX/EXAT/PX/PXAT为field设置过期时间。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以设置成功，同时将field当前版本号设置为ABS指定的版本号，注意ABS指定的版本号不能为0。MIN/MAX用户给field提供一个边界，只有本次incr操作后field的值还在此边界时incr才会被执行，否则返回overflow的错误。该命令会触发对field的被动淘汰检查 || EXHGET | EXHGET <key> <field> |获取key指定的TairHash一个field的值，如果TairHash不存在或者field不存在，则返回nil。该命令会触发对field的被动淘汰检查 || EXHGETWITHVER | EXHGETWITHVER <key> <field> | 同时获取key指定的TairHash一个field的值和版本，如果TairHash不存在或者field不存在，则返回nil。该命令会触发对field的被动淘汰检查 || EXHMGET | EXHMGET <key> <field> [field ...] | 同时获取key指定的TairHash多个field的值，如果TairHash不存在或者field不存在，则返回nil。该命令会触发对field的被动淘汰检查 || EXHMGETWITHVER | EXHMGETWITHVER <key> <field> [field ...] | 同时获取key指定的TairHash多个field的值和版本，如果TairHash不存在或者field不存在，则返回nil。该命令会触发对field的被动淘汰检查 || EXHDEL | EXHDEL <key> <field> <field> <field> ... |删除key指定的TairHash一个field，如果TairHash不存在或者field不存在则返回0 ，成功删除返回1。该命令会触发对field的被动淘汰检查 || EXHLEN | EXHLEN <key> [noexp] |获取key指定的TairHash中field的个数，该命令默认不会触发对过期field的被动淘汰，也不会将其过滤掉，所以结果中可能包含已经过期但还未被删除的field。如果只想返回当前没有过期的field个数，那么可以最后带一个noexp参数，注意，带有该参数时，exhlen的RT将受到exhash大小的影响（因为要循环遍历），同时exhlen不会触发对field的淘汰，它只是把过期的field过滤掉了而已 || EXHEXISTS | EXHEXISTS <key> <field> | 查询key指定的TairHash中是否存在对应的field。该命令会触发对field的被动淘汰检查 |
-| EXHSTRLEN | EXHSTRLEN <key> <field> | 获取key指定的TairHash一个field的值的长度。该命令会触发对field的被动淘汰检查 |
-| EXHKEYS | EXHKEYS <key> | 获取key指定的TairHash中所有field的键。该命令会过滤掉已经过期的field，但是不执行真正的删除操作，以便可以尽快响应客户端 |
-| EXHVALS | EXHVALS <key> | 获取key指定的TairHash中所有field的值 。该命令会过滤掉已经过期的field，但是不执行真正的删除操作，以便可以尽快响应客户端 |
-| EXHGETALL | EXHGETALL <key> | 获取key指定的TairHash中所有field的键值对。该命令会过滤掉已经过期的field，但是不执行真正的删除操作，以便可以尽快响应客户端 |
-| EXHSCAN | EXHSCAN key op subkey [MATCH pattern] [COUNT count] [DIR left/right] | 扫描key指定的TairHash,扫描的方式op可以为>、>=、<、<=、==、^、$，扫描的同时可以根据MATCH指定的pattern对subkey进行正则过滤，还可以使用COUNT对结果数目进行限制，如果不指定则默认值为10。该命令会过滤掉已经过期的field并将这些过期field同步删除掉，因此，建议COUNT值不要取太大，否则可能会导致单次EXHSCAN耗时过长，造成慢查询。DIR参数用于控制扫描的方向，left表示从扫描点开始向左扫描，right表示从扫描点开始向右扫描。 |
-
-
-### 命令详解
-
+## Command introduction
 
 #### EXHSET
 
-
-语法及复杂度：
-
-
-> EXHSET <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS version] [NOACTIVE ]  
-> 时间复杂度：O(1)
+Grammar and complexity：
 
 
+> EXHSET <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS version] 
+> time complexity：O(1)
 
-命令描述：
-
-
-> 向key指定的TairHash中插入一个field，如果TairHash不存在则自动创建一个，如果field已经存在则覆盖其值。在插入的时候，可以使用EX/EXAT/PX/PXAT给field设置过期时间，当field过期后会被主动（active expire）或被动（passivity expire）删除掉，但是当同时指定了NOACTIVE选项时，该field在过期后不会被active expire释放内存，只有客户端再次访问这个field时，引擎才会将其删除。如果指定了NX选项，则只有在field不存在的时候才会插入成功，同理，如果指定了XX选项，则只有在field存在的时候才能插入成功。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以插入成功，如果field不存在或者field当前版本为0则不进行检查，总是可以插入成功。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功, ABS指定的版本号不能为0。该命令会触发对field的被动淘汰检查
-
-
-
-参数：
+Command Description：  
+> Insert a field into the TairHash specified by the key. If TairHash does not exist, it will automatically create one, and if the field already exists, its value will be overwritten. When inserting, you can use EX/EXAT/PX/PXAT to set the expiration time for the field. When the field expires, it will be deleted actively (active expire) or passive (passivity expire). If the NX option is specified, the insertion will be successful only when the field does not exist. Similarly, if the XX option is specified, the insertion will be successful only when the field exists. If the VER parameter is specified, the version number carried by the VER must be consistent with the current version number of the field before it can be inserted successfully. If the field does not exist or the current version of the field is 0, no check is performed, and the insertion can always be successful. The ABS parameter is used to forcibly set the version number for the field, regardless of the current version number of the field, it can always be inserted successfully, and the version number specified by ABS cannot be 0. This command will trigger the passive elimination check of the field 
 
 
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
-> value: TairHash中的一个元素对应的值  
-> EX: 指定field的相对过期时间，单位为秒，为0表示不过期  
-> EXAT: 指定field的绝对过期时间，单位为秒，为0表示不过期  
-> PX: 指定field的相对过期时间，单位为毫秒，为0表示不过期  
-> PXAT: 指定field的绝对过期时间，单位为毫秒 ，为0表示不过期  
-> NX/XX: NX表示当要插入的field不存在的时候才允许插入，XX表示只有当field存在的时候才允许插入  
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
-> NOACTIVE：在指定EX/EXAT/PX/PXAT选项时，带有该选项时表示该field不使用active expire，这样可以节省内存开销  
+parameter：
+
+> key: The key used to find the TairHash
+> field: An element in TairHash
+> value: The value corresponding to an element in TairHash
+> EX: The relative expiration time of the specified field, in seconds, 0 means no expiration
+> EXAT: Specify the absolute expiration time of the field, in seconds, 0 means no expiration 
+> PX: The relative expiration time of the specified field, in milliseconds, 0 means no expiration
+> PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means no expiration
+> NX/XX: NX means inserting is allowed only when the field to be inserted does not exist, XX means inserting is allowed only when the field exists
+> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.
 
 
+Return：
 
-返回值：
-
-
-> 成功：新创建field并成功为它设置值时，命令返回1,如果field已经存在并且成功覆盖旧值，那么命令返回0 ；如果指定了XX且field不存在则返回-1，如果指定了NX且field已经存在返回-1；如果指定了VER且版本和当前版本不匹配则返回异常信息"ERR update version is stale"    
-> 失败：返回相应异常信息  
-
-
+> When a new field is created and the value is successfully set for it, the command returns 1, if the field already exists and successfully overwrites the old value, the command returns 0; if XX is specified and the field does not exist, it returns -1, if NX is specified and the field is already If exists, return -1; if VER is specified and the version does not match the current version, the exception message "ERR update version is stale" is returned
 
 #### EXHGET
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHGET <key> <field>
-> 时间复杂度：O(1)
+> time complexity：O(1)
 
 
 
-命令描述：
+Command Description：
 
 
-> 获取key指定的TairHash一个field的值，如果TairHash不存在或者field不存在，则返回nil  
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
-> field:   
+> Get the value of a field in TairHash specified by key, if TairHash does not exist or the field does not exist, return nil
 
 
 
-返回值：
+parameter：
 
 
-> 成功：当field存在时返回其对应的值，当TairHash不存在或者field不存在时返回nil  
-> 失败：返回相应异常信息  
+> key: The key used to find the TairHash
+> field: An element in TairHash  
+
+
+
+Return：
+
+
+> When the field exists, return its corresponding value, when TairHash does not exist or the field does not exist, return nil
 
 
 
 #### EXHMSET
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHMSET <key> <field> <value> [field value...]  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 同时向key指定的TairHash中插入多个field，如果TairHash不存在则自动创建一个，如果field已经存在则覆盖其值  
+> At the same time, insert multiple fields into TairHash specified by key. If TairHash does not exist, one will be created automatically, and if the field already exists, its value will be overwritten
 
 
 
-参数：
+parameter：
 
  
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
-> value: TairHash中的一个元素对应的值  
+> key: The key used to find the TairHash
+> field: An element in TairHash  
+> value: The value corresponding to an element in TairHash
 
 
 
-返回值：
+Return：
 
 
-> 成功：返回OK  
-> 失败：返回相应异常信息  
+> Return OK  
 
 
 
 #### EXHPEXPIREAT
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
-> EXHPEXPIREAT <key> <field> <milliseconds-timestamp> [VER/ABS version] [NOACTIVE ]  
-> 时间复杂度：O(1)  
-
-
-
-命令描述：
-
-
-> 在key指定的TairHash中为一个field设置绝对过期时间，单位为毫秒。当过期时间到时，该field会被主动删除，但是当同时指定了NOACTIVE选项时，该field在过期后不会被active expire释放内存，只有客户端再次访问这个field时，引擎才会将其删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，注意版本号不能为0。该命令会触发对field的被动淘汰检查  
+> EXHPEXPIREAT <key> <field> <milliseconds-timestamp> [VER/ABS version]
+> time complexity: (1)  
 
 
 
-参数：
+Command Description：
 
 
-> key: 用于查找该TairHash的键    
-> field: TairHash中的一个元素    
-> milliseconds-timestamp: 以毫秒为单位的时间戳    
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号    
-> NOACTIVE：在指定EX/EXAT/PX/PXAT选项时，带有该选项时表示该field不使用active expire，这样可以节省内存开销  
+> Set the absolute expiration time for a field in the TaiHash specified by the key, in milliseconds. When the expiration time is up, the field will be deleted actively. If the field does not exist, return 0 directly. If VERParameter is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VERParameter is 0, no version verification is performed. ABSParameter is used to force the field to set the version number, regardless of the current version number of the field, it can always be inserted successfully. At the same time, the current version number of the field is set to the version number specified by ABS. Note that the version number cannot be 0. This command will trigger the passive elimination check of the field
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：当field存在时返回1，当field不存在时返回0    
-> 失败：当版本校验失败时返回update version is stale错误，其他错误返回相应异常信息     
+> key: The key used to find the TairHash
+> field: An element in TairHash
+> milliseconds-timestamp: Timestamp in milliseconds
+> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.   
+
+
+Return：
+
+
+> Success: return 1 when the field exists, and return 0 when the field does not exist
+> When the version verification fails, the update version is stale error is returned
 
 
 
 #### EXHPEXPIRE
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
-> EXHPEXPIRE <key> <field> <milliseconds> [VER/ABS version] [NOACTIVE ]  
-> 时间复杂度：O(1)  
-
-
-
-命令描述：
-
-
-> 在key指定的TairHash中为一个field设置相对过期时间，单位为毫秒。当过期时间到时，该field会被主动删除，但是当同时指定了NOACTIVE选项时，该field在过期后不会被active expire释放内存，只有客户端再次访问这个field时，引擎才会将其删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，注意版本号不能为0。该命令会触发对field的被动淘汰  
+> EXHPEXPIRE <key> <field> <milliseconds> [VER/ABS version]
+> time complexity：O(1)  
 
 
 
-参数：
+Command Description：
 
 
-> key: 用于查找该TairHash的键    
-> field: TairHash中的一个元素    
-> milliseconds: 以毫秒为单位的过期时间    
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号    
-> NOACTIVE：在指定EX/EXAT/PX/PXAT选项时，带有该选项时表示该field不使用active expire，这样可以节省内存开销  
+> Set the relative expiration time for a field in the TairHash specified by the key, in milliseconds. When the expiration time is up, the field will be deleted actively. If the field does not exist, return 0 directly. If VERParameter is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VERParameter is 0, no version verification is performed. ABSParameter is used to force the field to set the version number, regardless of the current version number of the field, it can always be inserted successfully. At the same time, the current version number of the field is set to the version number specified by ABS. Note that the version number cannot be 0. This command will trigger the passive elimination of the field
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：当field存在时返回1，当field不存在时返回0  
-> 失败：当版本校验失败时返回update version is stale错误，其他错误返回相应异常信息  
+> key: The key used to find the TairHash
+> field: An element in TairHash   
+> milliseconds: Expiration time in milliseconds
+> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.   
+
+
+
+
+Return：
+
+
+> Return 1 when the field exists, and 0 when the field does not exist
+> When the version verification fails, the update version is stale error will be returned
 
 
 
 #### EXHEXPIREAT
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
-> EXHEXPIREAT <key> <field> <timestamp> [VER/ABS version] [NOACTIVE ]  
-> 时间复杂度：O(1)  
-
-
-
-命令描述：
-
-
-> 在key指定的TairHash中为一个field设置绝对过期时间，单位为秒，当过期时间到时，该field会被主动删除，但是当同时指定了NOACTIVE选项时，该field在过期后不会被active expire释放内存，只有客户端再次访问这个field时，引擎才会将其删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，注意版本号不能为0。该命令会触发对field的被动淘汰  
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
-> timestamp: 以秒为单位的时间戳  
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
-> NOACTIVE：在指定EX/EXAT/PX/PXAT选项时，带有该选项时表示该field不使用active expire，这样可以节省内存开销  
+> EXHEXPIREAT <key> <field> <timestamp> [VER/ABS version]
+> time complexity：O(1)  
 
 
 
-返回值：
+Command Description：
 
 
-> 成功：当field存在时返回1，当field不存在时返回0  
-> 失败：当版本校验失败时返回update version is stale错误，其他错误返回相应异常信息  
+> Set the absolute expiration time for a field in the TairHash specified by the key, in seconds. When the expiration time expires, the field will be actively deleted. If the field does not exist, return 0 directly. If VERParameter is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VERParameter is 0, no version verification is performed. ABSParameter is used to force the field to set the version number, regardless of the current version number of the field, it can always be inserted successfully. At the same time, the current version number of the field is set to the version number specified by ABS. Note that the version number cannot be 0. This command will trigger the passive elimination of the field
+
+Parameter：
+
+
+> key: The key used to find the TairHash
+> field: An element in TairHash
+> timestamp: Timestamp in seconds
+> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.
+
+
+
+Return：
+
+
+> Return 1 when the field exists, and 0 when the field does not exist
+> When the version verification fails, the update version is stale error will be returned, and the corresponding exception information will be returned for other errors.
 
 
 
 #### EXHEXPIRE
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
-> EXHEXPIRE <key> <field> <seconds> [VER/ABS version] [NOACTIVE ]  
-> 时间复杂度：O(1)  
-
-
-
-命令描述：
-
-
-> 在key指定的TairHash中为一个field设置相对过期时间，单位为秒，当过期时间到时，该field会被主动删除，但是当同时指定了NOACTIVE选项时，该field在过期后不会被active expire释放内存，只有客户端再次访问这个field时，引擎才会将其删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，注意版本号不能为0。该命令会触发对field的被动淘汰  
+> EXHEXPIRE <key> <field> <seconds> [VER/ABS version] 
+> time complexity：O(1)  
 
 
 
-参数：
+Command Description：
 
 
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
-> seconds: 以秒为单位的过期时间  
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
-> NOACTIVE：在指定EX/EXAT/PX/PXAT选项时，带有该选项时表示该field不使用active expire，这样可以节省内存开销  
+> Set the relative expiration time for a field in the TairHash specified by the key, in seconds. When the expiration time expires, the field will be actively deleted. If the field does not exist, return 0 directly. If VERParameter is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VERParameter is 0, no version verification is performed. ABSParameter is used to force the field to set the version number, regardless of the current version number of the field, it can always be inserted successfully. At the same time, the current version number of the field is set to the version number specified by ABS. Note that the version number cannot be 0. This command will trigger the passive elimination of the field
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：当field存在时返回1，当field不存在时返回0  
-> 失败：当版本校验失败时返回update version is stale错误，其他错误返回相应异常信息  
+> key: The key used to find the TairHash
+> field: An element in TairHash
+> timestamp: Timestamp in seconds
+> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.
+
+
+
+Return：
+
+
+> Return 1 when the field exists, and 0 when the field does not exist
+> When the version verification fails, the update version is stale error will be returned, and the corresponding exception information will be returned for other errors.
 
 
 
 #### EXHPTTL
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHPTTL <key> <field>  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 查看key指定的TairHash中一个field的剩余过期时间，单位为毫秒  
+> View the remaining expiration time of a field in TaiHash specified by key, in milliseconds
+
+
+Parameter：
+
+
+> key: The key used to find the TairHash
+> field: An element in TairHash
 
 
 
-参数：
+Return：
 
 
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
-
-
-
-返回值：
-
-
-> 成功：当TairHash或者field不存在时返回-2，当field存在但是没有设置过期时间时返回-1，当field存在且设置过期时间时时返回对应过期时间，单位为毫秒  
-> 失败：返回相应异常信息  
+> When TairHash or the field does not exist, it returns -2, when the field exists but no expiration time is set, it returns -1. When the field exists and the expiration time is set, it returns the corresponding expiration time, in milliseconds.
 
 
 
 #### EXHTTL
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHTTL <key> <field>  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 查看key指定的TairHash中一个field的剩余过期时间，单位为秒  
+> View the remaining expiration time of a field in TaiHash specified by key, in seconds
 
 
 
-参数：
+Parameter：
 
 
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
+> key: The key used to find the TairHash
+> field: An element in TairHash
  
 
 
-返回值：
+Return：
 
 
-> 成功：当TairHash或者field不存在时返回-2，当field存在但是没有设置过期时间时返回-1，当field存在且设置过期时间时时返回对应过期时间，单位为秒  
-> 失败：返回相应异常信息  
+> When TairHash or the field does not exist, it returns -2. When the field exists but no expiration time is set, it returns -1. When the field exists and the expiration time is set, it returns the corresponding expiration time, in seconds.
 
 
 
 #### EXHVER
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHVER <key> <field>  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 查看key指定的TairHash中一个field的当前版本号  
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
+> View the current version number of a field in TairHash specified by key
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：当TairHash不存在时返回-1，当field不存在时返回-2，否则返回field版本号  
-> 失败：返回相应异常信息  
+> key: The key used to find the TairHash
+> field: An element in TairHash
 
+
+
+Return：
+
+
+> 成功：Returns -1 when TairHash does not exist, returns -2 when the field does not exist, otherwise returns the field version number
 
 
 #### EXHSETVER
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHSETVER <key> <field> <version>  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 设置key指定的TairHash中一个field的版本号  
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
+> Set the version number of a field in TairHash specified by key
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：当TairHash或者field不存在则返回0，否则返回1  
-> 失败：返回相应异常信息  
+> key: The key used to find the TairHash
+> field: An element in TairHash
+> version: version number
+
+
+
+Return：
+
+
+> When TairHash or field does not exist, return 0, otherwise return 1
+ 
 
 
 
 #### EXHINCRBY
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHINCRBY <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version]   
 > [MIN minval] [MAX maxval]  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 将key指定的TairHash中一个field的值加上整数value。如果TairHash不存在则自动新创建一个，如果指定的field不存在，则在加之前先将field的值初始化为0。同时还可以使用EX/EXAT/PX/PXAT为field设置过期时间。  
-> 如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以设置成功，同时将field当前版本号设置为ABS指定的版本号，注意ABS指定的版本号不能为0。MIN/MAX用户给field提供一个边界，只有本次incr操作后field的值还在此边界时incr才会被执行，否则返回overflow的错误。该命令会触发对field的被动淘汰检查  
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
-> value: field对应的值  
-> EX: 指定field的相对过期时间，单位为秒 ，为0表示不过期  
-> EXAT: 指定field的绝对过期时间，单位为秒 ，为0表示不过期  
-> PX: 指定field的相对过期时间，单位为毫秒，为0表示不过期  
-> PXAT: 指定field的绝对过期时间，单位为毫秒，为0表示不过期  
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
-> NOACTIVE：在指定EX/EXAT/PX/PXAT选项时，带有该选项时表示该field不使用active expire，这样可以节省内存开销  
+> Add the integer value to the value of a field in TairHash specified by key. If TairHash does not exist, it will automatically create a new one. If the specified field does not exist, initialize the value of the field to 0 before adding it. At the same time, you can also use EX/EXAT/PX/PXAT to set the expiration time for the field.
+> If VER is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VERParameter is 0, no version verification is performed. ABSParameter is used to forcibly set the version number for the field, regardless of the current version number of the field, it can always be set successfully. At the same time, the current version number of the field is set to the version number specified by ABS. Note that the version number specified by ABS cannot be 0. MIN/MAX users provide a boundary for the field. Incr will be executed only when the value of the field is still on this boundary after this incr operation, otherwise an overflow error will be returned. This command will trigger the passive elimination check of the field
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：返回相加之后的值  
-> 失败：当版本校验失败时返回update version is stale错误，其他错误返回相应异常信息（如原来的field值不是浮点型）  
+> key: The key used to find the TairHash
+> field: An element in TairHash
+> value: The value to be increased
+> EX: The relative expiration time of the specified field, in seconds, 0 means no expiration
+> EXAT: Specify the absolute expiration time of the field, in seconds, 0 means no expiration 
+> PX: The relative expiration time of the specified field, in milliseconds, 0 means no expiration
+> PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means no expiration
+> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.
+
+Return：
+
+
+> Return the added value
+> When the version verification fails, an update version is stale error is returned
 
 
 
 #### EXHINCRBYFLOAT
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHINCRBYFLOAT <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval]  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 将key指定的TairHash中一个field的值加上浮点型value。如果TairHash不存在则自动新创建一个，如果指定的field不存在，则在加之前先将field的值初始化为0。同时还可以使用EX/EXAT/PX/PXAT为field设置过期时间。  
-> 如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以设置成功，同时将field当前版本号设置为ABS指定的版本号，注意ABS指定的版本号不能为0。MIN/MAX用户给field提供一个边界，只有本次incr操作后field的值还在此边界时incr才会被执行，否则返回overflow的错误。该命令会触发对field的被动淘汰检查  
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
-> value: field对应的值  
-> EX: 指定field的相对过期时间，单位为秒，为0表示不过期  
-> EXAT: 指定field的绝对过期时间，单位为秒，为0表示不过期  
-> PX: 指定field的相对过期时间，单位为毫秒，为0表示不过期  
-> PXAT: 指定field的绝对过期时间，单位为毫秒，为0表示不过期  
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
-> NOACTIVE：在指定EX/EXAT/PX/PXAT选项时，带有该选项时表示该field不使用active expire，这样可以节省内存开销  
+> Add the floating-point value to the value of a field in TairHash specified by key. If TairHash does not exist, it will automatically create a new one. If the specified field does not exist, initialize the value of the field to 0 before adding it. At the same time, you can also use EX/EXAT/PX/PXAT to set the expiration time for the field.
+> If VER is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VERParameter is 0, no version verification is performed. ABSParameter is used to forcibly set the version number for the field, regardless of the current version number of the field, it can always be set successfully. At the same time, the current version number of the field is set to the version number specified by ABS. Note that the version number specified by ABS cannot be 0. MIN/MAX users provide a boundary for the field. Incr will be executed only when the value of the field is still on this boundary after this incr operation, otherwise an overflow error will be returned. This command will trigger the passive elimination check of the field
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：返回相加之后的值  
-> 失败：当版本校验失败时返回update version is stale错误，其他错误返回相应异常信息（如原来的field值不是浮点型）  
+> key: The key used to find the TairHash
+> field: An element in TairHash
+> value: The value to be increased
+> EX: The relative expiration time of the specified field, in seconds, 0 means no expiration
+> EXAT: Specify the absolute expiration time of the field, in seconds, 0 means no expiration 
+> PX: The relative expiration time of the specified field, in milliseconds, 0 means no expiration
+> PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means no expiration
+> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.
+
+
+Return：
+
+
+> Return the added value
+> When the version verification fails, the update version is stale error is returned, and the corresponding exception information is returned for other errors (for example, the original field value is not a floating point)
 
 
 
 #### EXHGETWITHVER
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHGETWITHVER <key> <field>  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 同时获取key指定的TairHash一个field的值和版本，如果TairHash不存在或者field不存在，则返回nil  
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
+> At the same time, get the value and version of a field of TairHash specified by key. If TairHash does not exist or the field does not exist, return nil
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：如果TairHash不存在或者field不存在，则返回nil，否则返回field对应的值和版本  
-> 失败：返回相应异常信息  
+> key: The key used to find the TairHash
+> field: An element in TairHash
+
+
+
+Return：
+
+
+> If TairHash does not exist or the field does not exist, return nil, otherwise return the value and version corresponding to the field
 
 
 
 #### EXHMGET
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHMGET <key> <field> [field ...]  
-> 时间复杂度：O(n)  
+> time complexity：O(n)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 同时获取key指定的TairHash多个field的值，如果TairHash不存在或者field不存在，则返回nil  
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
+> At the same time get the value of multiple fields of TairHash specified by key, if TairHash does not exist or the field does not exist, return nil
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：返回一个数组，数组的每一个元素对应一个field, 如果TairHash不存在或者field不存在，则为nil，否则为field对应的值  
-> 失败：返回相应异常信息  
+> key: The key used to find the TairHash
+> field: An element in TairHash
+
+
+
+Return：
+
+
+> Returns an array, each element of the array corresponds to a field, if TairHash does not exist or the field does not exist, it is nil, otherwise it is the value corresponding to the field
 
 
 
 #### EXHMGETWITHVER
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHMGETWITHVER <key> <field> [field ...]  
-> 时间复杂度：O(n)  
+> time complexity：O(n)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 同时获取key指定的TairHash多个field的值和版本，如果TairHash不存在或者field不存在，则返回nil
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
+> Get the value and version of multiple fields of TairHash specified by key at the same time. If TairHash does not exist or the field does not exist, return nil
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：返回一个数组，数组的每一个元素对应一个field, 如果TairHash不存在或者field不存在，则为nil，否则为field对应的值和版本  
-> 失败：返回相应异常信息  
+> key: The key used to find the TairHash
+> field: An element in TairHash
+
+
+
+Return：
+
+
+> Returns an array, each element of the array corresponds to a field, if TairHash does not exist or the field does not exist, it is nil, otherwise, the value and version corresponding to the field
 
 
 
 #### EXHDEL
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHDEL <key> <field> <field> <field> ...  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 删除key指定的TairHash一个field，如果TairHash不存在或者field不存在则返回0 ，成功删除返回1
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
+> Delete a field of TairHash specified by key, if TairHash does not exist or the field does not exist, return 0, and return 1 if successfully deleted
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：如果TairHash不存则返回0 ，成功怎返回成功删除的filed的个数  
-> 失败：返回相应异常信息  
+> key: The key used to find the TairHash
+> field: An element in TairHash
+
+
+
+Return：
+
+
+> If TairHash does not exist, return 0. How to return the number of files deleted successfully?
 
 
 
 #### EXHLEN
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHLEN <key> [noexp]  
-> 时间复杂度：不是noexp选项时是O(1)，带noexp选项时是O(N)  
+> time complexity：It is O(1) if it is not a noexp option, and O(N) if it is a noexp option
 
 
 
-命令描述：
+Command Description：
 
 
-> 获取key指定的TairHash中field的个数，该命令默认不会触发对过期field的被动淘汰，也不会将其过滤掉，所以结果中可能包含已经过期但还未被删除的field。如果只想返回当前没有过期的field个数，那么可以最后带一个noexp参数，注意，带有该参数时，exhlen的RT将受到exhash大小的影响（因为要循环遍历），同时exhlen不会触发对field的淘汰，它只是把过期的field过滤了一下而已  
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
+> Get the number of fields in TairHash specified by key. By default, this command will not trigger the passive elimination of expired fields, nor will it filter them out, so the result may include fields that have expired but have not been deleted. If you only want to return the number of fields that have not expired, you can bring a noexpParameter at the end. Note that with this parameter, the RT of exhlen will be affected by the size of exhash (because it needs to be traversed), and exhlen will not trigger the field Is eliminated, it just filters out the expired fields
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：如果TairHash不存在或者field不存在则返回0 ，成功删除返回TairHash中field个数  
-> 失败：返回相应异常信息  
+> key: The key used to find the TairHash
+
+
+
+Return：
+
+
+> If TairHash does not exist or the field does not exist, return 0, if successful deletion returns the number of fields in TairHash
 
 
 
 #### EXHEXISTS
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHEXISTS <key> <field>  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 查询key指定的TairHash中是否存在对应的field  
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
+> Query whether there is a corresponding field in TairHash specified by key
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：如果TairHash不存在或者field不存在则返回0 ，如果field存在则返回1  
-> 失败：返回相应异常信息
+> key: The key used to find the TairHash
+> field: An element in TairHash
+
+
+
+Return：
+
+
+> If TairHash does not exist or the field does not exist, return 0, if the field exists, return 1  
 
 
 
 #### EXHSTRLEN
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHSTRLEN <key> <field>  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 获取key指定的TairHash一个field的值的长度
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
-> field: TairHash中的一个元素  
+> Get the length of the value of a field in TaiHash specified by key
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：如果TairHash不存在或者field不存在则返回0 ，否则返回field对应值的长度  
-> 失败：返回相应异常信息  
+> key: The key used to find the TairHash
+> field: An element in TairHash
+
+
+
+Return：
+
+
+> If TairHash does not exist or the field does not exist, return 0, otherwise return the length of the corresponding value of the field
 
 
 
 #### EXHKEYS
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHKEYS <key>  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 获取key指定的TairHash中所有field的键  
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
+> Get the keys of all fields in TairHash specified by key
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：返回一个数组，数组的每一位对应TairHash中的每一个field，如果TairHash不存则返回空的数组  
-> 失败：返回相应异常信息  
+> key: The key used to find the TairHash
+
+
+
+Return：
+
+
+> Return an array, each bit of the array corresponds to each field in TairHash, if TairHash does not exist, return an empty array
 
 
 
 #### EXHVALS
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHVALS <key>  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 获取key指定的TairHash中所有field的值  
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键  
+> Get the value of all fields in TairHash specified by key
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：返回一个数组，数组的每一位对应TairHash中的每一个field的值，如果TairHash不存则返回空的数组  
-> 失败：返回相应异常信息  
+> key: The key used to find the TairHash
+
+
+
+Return：
+
+
+> Returns an array, each bit of the array corresponds to the value of each field in TairHash, if TairHash does not exist, it returns an empty array
 
 
 
 #### EXHGETALL
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHGETALL <key>  
-> 时间复杂度：O(1)  
+> time complexity：O(1)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 获取key指定的TairHash中所有field的键值对  
-
-
-
-参数：
-
-
-> key: 用于查找该TairHash的键
+> Get the key-value pairs of all fields in TairHash specified by key
 
 
 
-返回值：
+Parameter：
 
 
-> 成功：返回一个数组，数组的每一位对应TairHash中的每一个field的键值对，如果TairHash不存则返回空的数组  
-> 失败：返回相应异常信息  
+> key: The key used to find the TairHash
+
+
+
+Return：
+
+
+> Returns an array, each bit of the array corresponds to the key-value pair of each field in TairHash, if TairHash does not exist, it returns an empty array
+
 
 
 
 #### EXHSCAN
 
 
-语法及复杂度：
+Grammar and complexity：
 
 
 > EXHSCAN <key> <op> <subkey> [MATCH pattern] [COUNT count]  
-> 时间复杂度：O(1)、O(N)  
+> time complexity：O(1)、O(N)  
 
 
 
-命令描述：
+Command Description：
 
 
-> 扫描key指定的TairHash,扫描的方式op可以为>、>=、<、<=、==、^、$，扫描的同时可以根据MATCH指定的pattern对结果集进行过滤，还可以使用COUNT对单次扫描个数进行限制，如果不指定则默认值为10。TairHash和Redis云生Hash的SCAN/HSCAN等不太一致，它没有cursor的概念，相反用户可以使用subkey直接定位扫描的开始位置，相比对业务毫无意义的cursor而言，subkey对业务更加友好。同时，原生的Redis Hash扫描算法可能在rehash的时候返回大量的已经扫描过的field，而TairHash则没有这个问题，渐近扫描的过程中，无论TairHash中的field增加还是减少，已经被扫描过的field绝对不会被再次扫描和返回。
+> Scan the TairHash specified by the key, the scanning mode op can be >, >=, <, <=, ==, ^, $, and the result set can be filtered according to the pattern specified by MATCH while scanning, and the COUNT pair list can also be used The number of scans is limited. If not specified, the default value is 10. The SCAN/HSCAN of TairHash and Redis Yunsheng Hash are not the same. It does not have the concept of cursor. On the contrary, users can use subkey to directly locate the starting position of the scan. Compared with the cursor which is meaningless to business, subkey is more business-friendly . At the same time, the native Redis Hash scanning algorithm may return a large number of scanned fields when rehashing, but TaiHash does not have this problem. During the asymptotic scanning process, regardless of whether the field in TaiHash increases or decreases, the scanned fields are already scanned. The field will never be scanned and returned again.
 
 
-
-参数：
-
-
-> key: 用于查找该TairHash的键    
-> op: 用于定位扫描的起点，可以是:>(从第一个大于subkey的field开始),>=(从第一个大于等于subkey的field位置开始),<(从第一个小于subkey的field开始)，<=(从第一个小于等于subkey的field开始)，==(从第一个等于subkey的field开始)，^(从第一个field开始)，\$(从最后一个field开始)      
-> subkey: 用于搜索扫描起始位置的键，当op为^或$时该值将被忽略  
-> MATCH: 用于对扫描结果进行过滤的规则  
-> COUNT: 用于规定单次扫描field的个数，注意，COUNT仅表示每次扫描TairHash的feild的个数，不代表最终一定会返回COUNT个field结果集，结果集的大小还要根据TairHash中当前field个数和是否指定MATCH进行过滤而定。COUNT默认值为10。  
+Parameter：
 
 
-
-返回值：
-
-
-> 成功：返回一个具有两个元素的数组，数组第一个元素是一个字符串，表示本次扫描结束后下一个待扫描的field，如果本次扫描结束后已经没有field可以扫描，那么该元素为一个空的字符串。第二个数组元素还是一个数组，数组包含了所有本次被迭代的field/value。如果扫描到一个空的TairHash或者是TairHash不存在，那么这两个数组元素都为空。  
-> 失败：返回相应异常信息  
+> key: The key used to find the TairHash
+> op: Used to locate the starting point of the scan, which can be:> (start from the first field greater than subkey), >= (start from the first field position greater than or equal to subkey), <(start from the first field less than subkey ), <= (start from the first field less than or equal to subkey), == (start from the first field equal to subkey), ^ (start from the first field), \$ (start from the last field)   
+> subkey: The key used to search for the starting position of the scan. When op is ^ or $, the value will be ignored
+> MATCH: Rules for filtering scan results
+> COUNT: It is used to specify the number of fields in a single scan. Note that COUNT only represents the number of feilds of TairHash scanned each time. It does not mean that COUNT field result sets will be returned in the end. The size of the result set depends on the current fields in TaiHash. The number and whether to specify MATCH for filtering depends. The default value of COUNT is 10
 
 
 
-**使用示例：**
-1、如何使用渐进式扫描整个TairHash:   
+Return：
+
+
+> Returns an array with two elements. The first element of the array is a string, which represents the next field to be scanned after the end of this scan. If there is no field to scan after the end of this scan, then the element is empty String. The second array element is still an array, and the array contains all the field/values that are iterated this time. If an empty TairHash is found or TairHash does not exist, then both array elements are empty. 
+ 
+
+
+
+**example：**
+1、How to progressively scan the entire TaiHash:   
 ```
 127.0.0.1:6379> exhmset exhashkey field1 val1 field2 val2 field3 val3 field4 val4 field5 val5 field6 val6 field7 val7 field8 val8 field9 val9
 OK
@@ -966,8 +908,8 @@ OK
 127.0.0.1:6379>
 ```
 
-2、如何使用MATCH对结果集进行过滤 
-精确匹配：
+2、How to use MATCH to filter the result set
+Exact match：
 
 
 ```
@@ -992,7 +934,7 @@ OK
 ```
 
 
-模糊匹配：
+Fuzzy matching：
 
 ```
 127.0.0.1:6379> exhmset exhashkey field1_1 val1_1 field1_2 val1_2 field1_3 val1_3 field1_4 val1_4 field1_5 val1_5 field2_1 val2_1 field2_2 val2_2 field2_3 val2_3 field6_1 val6_1 field6_2 val6_2 field6_3 val6_3 field6_4 val6_4 field8_1 val8_1 field8_2 val8_4
@@ -1022,23 +964,24 @@ OK
 
 <br/>
   
-## 编译及使用
+## BUILD
 
 ```
 mkdir build  
 cd build  
 cmake ../ && make -j
 ```
-编译成功后会在lib目录下产生tairhash_module.so库文件
-## 测试方法
+then the tairhash_module.so library file will be generated in the lib directory
 
-1. 修改`tests`目录下tairhash.tcl文件中的路径为`set testmodule [file your_path/tairhash_module.so]`
-2. 将`tests`目录下tairhash.tcl文件路径加入到redis的test_helper.tcl的all_tests中
-3. 在redis根目录下运行./runtest --single tairhash
+## TEST
+
+1. Modify the path in the tairhash.tcl file in the `tests` directory to `set testmodule [file your_path/tairhash_module.so]`
+2. Add the path of the tairhash.tcl file in the `tests` directory to the all_tests of redis test_helper.tcl
+3. run ./runtest --single tairhash
+
 
 <br/>
 
 ##
-## 客户端
+## Client
 ### Java : https://github.com/aliyun/alibabacloud-tairjedis-sdk
-### 其他语言：可以参考java的sendcommand自己封装

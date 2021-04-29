@@ -1263,19 +1263,6 @@ start_server {tags {"tairzset"} overrides {bind 0.0.0.0}} {
         assert_equal 1 [r exhlen exhashkey]
     }
 
-    test {Exhash stress test} {
-        r del exhashkey
-        set elements 100000
-        for {set j 0} {$j < $elements} {incr j} {
-            r exhset exhashkey $j $j PX 500
-        }
-
-        after 2000
-
-        set exist_num [r exists exhashkey]
-        assert_equal 0 $exist_num
-    }
-
     test {Exhash set ignore version} {
         r del exhashkey
 

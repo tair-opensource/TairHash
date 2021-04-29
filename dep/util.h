@@ -31,11 +31,12 @@
 #define __UTIL_H_
 
 #include <stdint.h>
+#include <stddef.h>
 
 /* The maximum number of characters needed to represent a long double
  * as a string (long double has a huge range).
  * This should be the size of the buffer given to ld2string */
-#define MAX_LONG_DOUBLE_CHARS 5*1024
+#define MAX_LONG_DOUBLE_CHARS 5 * 1024
 
 int m_stringmatchlen(const char *p, int plen, const char *s, int slen, int nocase);
 int m_stringmatch(const char *p, const char *s, int nocase);

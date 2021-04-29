@@ -28,10 +28,10 @@
 
 #define EXHASH_ERRORMSG_SYNTAX "ERR syntax error"
 #define EXHASH_ERRORMSG_VERSION "ERR update version is stale"
-#define EXHASH_ERRORMSG_NOT_INTEGER  "ERR value is not an integer"
-#define EXHASH_ERRORMSG_NOT_FLOAT  "ERR value is not an float"
+#define EXHASH_ERRORMSG_NOT_INTEGER "ERR value is not an integer"
+#define EXHASH_ERRORMSG_NOT_FLOAT "ERR value is not an float"
 #define EXHASH_ERRORMSG_OVERFLOW "ERR increment or decrement would overflow"
-#define EXHASH_ERRORMSG_INTERNAL_ERR  "ERR internal error"
+#define EXHASH_ERRORMSG_INTERNAL_ERR "ERR internal error"
 #define EXHASH_ERRORMSG_INT_MIN_MAX "ERR min or max is specified, but value is not an integer"
 #define EXHASH_ERRORMSG_FLOAT_MIN_MAX "ERR min or max is specified, but value is not a float"
 #define EXHASH_ERRORMSG_MIN_MAX "ERR min value is bigger than max value"

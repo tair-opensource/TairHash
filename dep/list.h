@@ -33,20 +33,20 @@
 
 /* Node, List, and Iterator are the only data structures used currently. */
 
-typedef struct listNode {
-    struct listNode *prev;
-    struct listNode *next;
+typedef struct m_listNode {
+    struct m_listNode *prev;
+    struct m_listNode *next;
     void *value;
-} listNode;
+} m_listNode;
 
-typedef struct listIter {
-    listNode *next;
+typedef struct m_listIter {
+    m_listNode *next;
     int direction;
-} listIter;
+} m_listIter;
 
 typedef struct list {
-    listNode *head;
-    listNode *tail;
+    m_listNode *head;
+    m_listNode *tail;
     void *(*dup)(void *ptr);
     void (*free)(void *ptr);
     int (*match)(void *ptr, void *key);
@@ -61,32 +61,32 @@ typedef struct list {
 #define listNextNode(n) ((n)->next)
 #define listNodeValue(n) ((n)->value)
 
-#define listSetDupMethod(l,m) ((l)->dup = (m))
-#define listSetFreeMethod(l,m) ((l)->free = (m))
-#define listSetMatchMethod(l,m) ((l)->match = (m))
+#define listSetDupMethod(l, m) ((l)->dup = (m))
+#define listSetFreeMethod(l, m) ((l)->free = (m))
+#define listSetMatchMethod(l, m) ((l)->match = (m))
 
 #define listGetDupMethod(l) ((l)->dup)
 #define listGetFree(l) ((l)->free)
 #define listGetMatchMethod(l) ((l)->match)
 
 /* Prototypes */
-list *listCreate(void);
-void listRelease(list *list);
-void listEmpty(list *list);
-list *listAddNodeHead(list *list, void *value);
-list *listAddNodeTail(list *list, void *value);
-list *listInsertNode(list *list, listNode *old_node, void *value, int after);
-void listDelNode(list *list, listNode *node);
-listIter *listGetIterator(list *list, int direction);
-listNode *listNext(listIter *iter);
-void listReleaseIterator(listIter *iter);
-list *listDup(list *orig);
-listNode *listSearchKey(list *list, void *key);
-listNode *listIndex(list *list, long index);
-void listRewind(list *list, listIter *li);
-void listRewindTail(list *list, listIter *li);
-void listRotate(list *list);
-void listJoin(list *l, list *o);
+list *m_listCreate(void);
+void m_listRelease(list *list);
+void m_listEmpty(list *list);
+list *m_listAddNodeHead(list *list, void *value);
+list *m_listAddNodeTail(list *list, void *value);
+list *m_listInsertNode(list *list, m_listNode *old_node, void *value, int after);
+void m_listDelNode(list *list, m_listNode *node);
+m_listIter *m_listGetIterator(list *list, int direction);
+m_listNode *m_listNext(m_listIter *iter);
+void m_listReleaseIterator(m_listIter *iter);
+list *m_listDup(list *orig);
+m_listNode *m_listSearchKey(list *list, void *key);
+m_listNode *m_listIndex(list *list, long index);
+void m_listRewind(list *list, m_listIter *li);
+void m_listRewindTail(list *list, m_listIter *li);
+void m_listRotate(list *list);
+void m_listJoin(list *l, list *o);
 
 /* Directions for iterators */
 #define AL_START_HEAD 0

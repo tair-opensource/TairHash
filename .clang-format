@@ -1,0 +1,12 @@
+# We'll use defaults from the Google style, but with 4 columns indentation.
+BasedOnStyle: Google
+Language: Cpp
+IndentWidth: 4
+# Force pointers to the type for C++.
+DerivePointerAlignment: false
+PointerAlignment: Right
+AccessModifierOffset: -4
+
+# https://stackoverflow.com/questions/56881048/how-to-get-clang-format-to-break-on-and
+BreakBeforeBinaryOperators: All
+ColumnLimit: 0

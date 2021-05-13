@@ -1316,7 +1316,12 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         m_dictAdd(ex_hash_obj->hash, takeAndRef(skey), ex_hash_val);
     }
 
-    RedisModule_Replicate(ctx, "EXHSET", "sss", argv[1], argv[2], ex_hash_val->value);
+    if (milliseconds > 0) {
+        RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], ex_hash_val->value, "abs", ex_hash_val->version, "pxat", (milliseconds + RedisModule_Milliseconds()));
+    } else {
+       RedisModule_Replicate(ctx, "EXHSET", "ssscl", argv[1], argv[2], ex_hash_val->value, "abs", ex_hash_val->version);
+    }
+
     RedisModule_ReplyWithLongLong(ctx, cur_val);
     return REDISMODULE_OK;
 }
@@ -1536,8 +1541,11 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
         m_dictAdd(ex_hash_obj->hash, takeAndRef(skey), ex_hash_val);
     }
 
-    /* FIXME:version */
-    RedisModule_Replicate(ctx, "EXHSET", "sss", argv[1], argv[2], ex_hash_val->value);
+    if (milliseconds > 0) {
+       RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], ex_hash_val->value, "abs", ex_hash_val->version, "pxat", (milliseconds + RedisModule_Milliseconds()));
+    } else {
+       RedisModule_Replicate(ctx, "EXHSET", "ssscl", argv[1], argv[2], ex_hash_val->value, "abs", ex_hash_val->version);
+    }
     RedisModule_ReplyWithString(ctx, ex_hash_val->value);
     return REDISMODULE_OK;
 }
@@ -1654,7 +1662,11 @@ int TairHashTypeHmget_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
 
     exHashObj *ex_hash_obj = NULL;
     if (type == REDISMODULE_KEYTYPE_EMPTY) {
-        return RedisModule_ReplyWithNull(ctx);
+        RedisModule_ReplyWithArray(ctx, argc - 2);
+        for (int ii = 2; ii < argc; ++ii) {
+            RedisModule_ReplyWithNull(ctx);
+        }
+        return REDISMODULE_OK;
     } else {
         if (RedisModule_ModuleTypeGetType(key) != TairHashType) {
             return RedisModule_ReplyWithError(ctx, REDISMODULE_ERRORMSG_WRONGTYPE);
@@ -1706,11 +1718,10 @@ int TairHashTypeHmgetWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
 
     exHashObj *ex_hash_obj = NULL;
     if (type == REDISMODULE_KEYTYPE_EMPTY) {
-        RedisModule_ReplyWithArray(ctx, REDISMODULE_POSTPONED_ARRAY_LEN);
+        RedisModule_ReplyWithArray(ctx, argc - 2);
         for (int ii = 2; ii < argc; ++ii) {
             RedisModule_ReplyWithNull(ctx);
         }
-        RedisModule_ReplySetArrayLength(ctx, argc - 2);
         return REDISMODULE_OK;
     } else {
         if (RedisModule_ModuleTypeGetType(key) != TairHashType) {
@@ -1846,6 +1857,7 @@ int TairHashTypeHdelWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString 
         if (ex_hash_val != NULL) {
             if (ver == 0 || ver == ex_hash_val->version) {
                 if (m_dictDelete(ex_hash_obj->hash, argv[j]) == DICT_OK) {
+                    m_zslDelete(zsl[RedisModule_GetSelectedDb(ctx)], ex_hash_val->expire, argv[1], argv[j], NULL);
                     RedisModule_Replicate(ctx, "EXHDEL", "ss", argv[1], argv[j]);
                     deleted++;
                 }

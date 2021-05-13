@@ -191,7 +191,6 @@ int m_zslDeleteWholeKey(m_zskiplist *zsl, RedisModuleString *key) {
     int i;
 
     if (key == NULL) {
-        printf("woca\n");
         return 0;
     }
 

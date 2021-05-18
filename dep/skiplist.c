@@ -185,40 +185,6 @@ int m_zslDelete(m_zskiplist *zsl, long long score, RedisModuleString *key, Redis
     return 0; /* not found */
 }
 
-int m_zslDeleteWholeKey(m_zskiplist *zsl, RedisModuleString *key) {
-    m_zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
-    unsigned long removed = 0;
-    int i;
-
-    if (key == NULL) {
-        return 0;
-    }
-
-    x = zsl->header;
-    for (i = zsl->level - 1; i >= 0; i--) {
-        while (x->level[i].forward && 
-            (x->level[i].forward->key == NULL || 
-            (x->level[i].forward->key != NULL && RedisModule_StringCompare(x->level[i].forward->key, key) != 0)))
-            x = x->level[i].forward;
-        update[i] = x;
-    }
-
-    /* Current node is the last with score < or <= min. */
-    x = x->level[0].forward;
-
-    /* Delete nodes while in range. */
-    while (x) {
-        m_zskiplistNode *next = x->level[0].forward;
-        if (RedisModule_StringCompare(x->key, key) == 0) {
-            m_zslDeleteNode(zsl, x, update);
-            m_zslFreeNode(x); /* Here is where x->ele is actually released. */
-            removed++;
-        }
-        x = next;
-    }
-    return removed;
-}
-
 /* Update the score of an elmenent inside the sorted set skiplist.
  * Note that the element must exist and must match 'score'.
  * This function does not update the score in the hash table side, the

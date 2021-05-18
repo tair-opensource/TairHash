@@ -40,4 +40,3 @@ void m_zslDeleteNode(m_zskiplist *zsl, m_zskiplistNode *x, m_zskiplistNode **upd
 m_zskiplistNode *m_zslUpdateScore(m_zskiplist *zsl, long long  curscore, RedisModuleString *key, RedisModuleString *field, long long newscore);
 m_zskiplistNode* m_zslGetElementByRank(m_zskiplist *zsl, unsigned long rank);
 unsigned long m_zslDeleteRangeByRank(m_zskiplist *zsl, unsigned int start, unsigned int end);
-int m_zslDeleteWholeKey(m_zskiplist *zsl, RedisModuleString *key);

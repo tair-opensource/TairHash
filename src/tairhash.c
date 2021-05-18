@@ -194,7 +194,15 @@ m_dictType tairhashDictType = {
 };
 
 static void exHashTypeReleaseObject(struct exHashObj *o) {
-    m_zslDeleteWholeKey(zsl[o->dbid], o->key);
+    m_dictIterator *di;
+    m_dictEntry *de;
+    di = m_dictGetIterator(o->hash);
+    while ((de = m_dictNext(di)) != NULL) {
+        if (((exHashVal *)dictGetVal(de))->expire) {
+            m_zslDelete(zsl[o->dbid], ((exHashVal *)dictGetVal(de))->expire, o->key, dictGetKey(de), NULL);
+        }
+    }
+    m_dictReleaseIterator(di);
     m_dictRelease(o->hash);
     RedisModule_FreeString(NULL, o->key);
     RedisModule_Free(o);
@@ -246,6 +254,7 @@ inline static int expireTairHashObjIfNeeded(RedisModuleCtx *ctx, RedisModuleStri
         m_zslDelete(zsl[o->dbid], when, key_dup, field_dup, NULL);
     }
     m_dictDelete(o->hash, field);
+    printf("ca\n");
     RedisModule_Replicate(ctx, "EXHDEL", "ss", key_dup, field_dup);
     RedisModule_FreeString(NULL, key_dup);
     RedisModule_FreeString(NULL, field_dup);
@@ -1268,10 +1277,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         }
     }
 
-    if ((incr < 0 && cur_val < 0 && incr < (LLONG_MIN - cur_val)) || 
-        (incr > 0 && cur_val > 0 && incr > (LLONG_MAX - cur_val)) || 
-        (max_p != NULL && cur_val + incr > max) || 
-        (min_p != NULL && cur_val + incr < min)) {
+    if ((incr < 0 && cur_val < 0 && incr < (LLONG_MIN - cur_val)) || (incr > 0 && cur_val > 0 && incr > (LLONG_MAX - cur_val)) || (max_p != NULL && cur_val + incr > max) || (min_p != NULL && cur_val + incr < min)) {
         if (nokey) {
             exHashValRelease(ex_hash_val);
         }
@@ -1319,7 +1325,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     if (milliseconds > 0) {
         RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], ex_hash_val->value, "abs", ex_hash_val->version, "pxat", (milliseconds + RedisModule_Milliseconds()));
     } else {
-       RedisModule_Replicate(ctx, "EXHSET", "ssscl", argv[1], argv[2], ex_hash_val->value, "abs", ex_hash_val->version);
+        RedisModule_Replicate(ctx, "EXHSET", "ssscl", argv[1], argv[2], ex_hash_val->value, "abs", ex_hash_val->version);
     }
 
     RedisModule_ReplyWithLongLong(ctx, cur_val);
@@ -1542,9 +1548,9 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
     }
 
     if (milliseconds > 0) {
-       RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], ex_hash_val->value, "abs", ex_hash_val->version, "pxat", (milliseconds + RedisModule_Milliseconds()));
+        RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], ex_hash_val->value, "abs", ex_hash_val->version, "pxat", (milliseconds + RedisModule_Milliseconds()));
     } else {
-       RedisModule_Replicate(ctx, "EXHSET", "ssscl", argv[1], argv[2], ex_hash_val->value, "abs", ex_hash_val->version);
+        RedisModule_Replicate(ctx, "EXHSET", "ssscl", argv[1], argv[2], ex_hash_val->value, "abs", ex_hash_val->version);
     }
     RedisModule_ReplyWithString(ctx, ex_hash_val->value);
     return REDISMODULE_OK;

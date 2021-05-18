@@ -382,6 +382,23 @@ restart:
         expire_timer_id = RedisModule_CreateTimer(ctx, ex_hash_active_expire_period, activeExpireTimerHandler, NULL);
 }
 
+void swapDbCallback(RedisModuleCtx *ctx, RedisModuleEvent e, uint64_t sub, void *data) {
+    REDISMODULE_NOT_USED(e);
+    REDISMODULE_NOT_USED(sub);
+
+    RedisModuleSwapDbInfo *ei = data;
+
+    MUTEX_LOCK(ei->dbnum_first);
+    MUTEX_LOCK(ei->dbnum_second);
+
+    m_zskiplist *tmp = zsl[ei->dbnum_first];
+    zsl[ei->dbnum_first] = zsl[ei->dbnum_second];
+    zsl[ei->dbnum_second] = tmp;
+
+    MUTEX_UNLOCK(ei->dbnum_second);
+    MUTEX_UNLOCK(ei->dbnum_first);
+}
+
 void startExpireTimer(RedisModuleCtx *ctx, void *data) {
     if (!enable_active_expire)
         return;
@@ -2723,6 +2740,8 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         startExpireTimer(ctx2, NULL);
         RedisModule_FreeThreadSafeContext(ctx2);
     }
+
+    RedisModule_SubscribeToServerEvent(ctx, RedisModuleEvent_SwapDB, swapDbCallback);
 
     return REDISMODULE_OK;
 }

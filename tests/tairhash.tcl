@@ -3,6 +3,20 @@ set testmodule [file normalize your_path/tairhash_module.so]
 start_server {tags {"tairzset"} overrides {bind 0.0.0.0}} {
     r module load $testmodule
 
+    proc create_big_tairhash {key iterm} {
+        r del $key
+        for {set j 0} {$j < $iterm} {incr j} {
+            r exhset $key $j $j
+        }
+    }
+
+    proc create_big_tairhash_with_expire {key iterm expire} {
+        r del $key
+        for {set j 0} {$j < $iterm} {incr j} {
+            r exhset $key $j $j ex $expire
+        }
+    }
+
     test {Exhset/exhget basic} {
         r del exhashkey
 
@@ -355,7 +369,40 @@ start_server {tags {"tairzset"} overrides {bind 0.0.0.0}} {
         assert_equal "" $ret_val
     }
 
-     test {Active expire rdb} {
+    test {Active expire with repeat feilds} {
+        r select 8
+        r del exhashkey
+        r exhset exhashkey f v ex 1
+        r exhset exhashkey f v ex 1
+        r exhset exhashkey f v ex 1
+
+        assert_equal 1 [r exhlen exhashkey]
+
+        after 2000
+
+        assert_equal 0 [r exhlen exhashkey]
+        assert_equal 0 [r exists exhashkey]
+        set info [r exhexpireinfo]
+        assert { [string match "*db: 8, unexpired_fields: 0, active_expired_fields: 1*" $info] }
+    }
+
+    test {Async flushall/unlink} {
+        create_big_tairhash_with_expire k1 10000 100
+        create_big_tairhash_with_expire k2 10000 100
+        create_big_tairhash_with_expire k3 10000 100
+
+        r flushall async 
+
+        create_big_tairhash_with_expire k1 100000 100
+        create_big_tairhash_with_expire k2 100000 100
+        create_big_tairhash_with_expire k3 100000 100
+
+        r unlink k1
+        r unlink k2
+        r unlink k3
+    }
+
+    test {Active expire rdb} {
         r del exhashkey
 
         r select 0
@@ -422,6 +469,21 @@ start_server {tags {"tairzset"} overrides {bind 0.0.0.0}} {
 
         set ret_val [r exhget exhashkey field1]
         assert_equal "" $ret_val
+    }
+
+    test {Swapdb in rdb save and load} {
+        r swapdb 7 13
+        r swapdb 13 14 
+
+        set info [r exhexpireinfo]
+        assert { [string match "*13 -> 7*14 -> 13*7 -> 14*" $info] }
+
+        r bgsave
+        waitForBgsave r
+        r debug reload
+
+        set info [r exhexpireinfo]
+        assert { [string match "*13 -> 7*14 -> 13*7 -> 14*" $info] }
     }
 
     test {Active expire aof} {
@@ -1106,6 +1168,40 @@ start_server {tags {"tairzset"} overrides {bind 0.0.0.0}} {
         assert_equal 200 [r exhttl exhashkey field]
     }
 
+    test {SwapDB with active expire} {
+        r flushall
+        r select 10
+        create_big_tairhash_with_expire exk1 10 2
+        create_big_tairhash_with_expire exk2 10 2
+        create_big_tairhash_with_expire exk3 10 2
+
+        assert_equal 3 [r dbsize]
+        r swapdb 10 11
+        assert_equal 0 [r dbsize]
+        r select 11
+        assert_equal 3 [r dbsize]
+        after 3000
+        assert_equal 0 [r dbsize]   
+
+        set info [r exhexpireinfo]
+        assert { [string match "*db: 11, unexpired_fields: 0, active_expired_fields: 30*" $info] }
+        assert { [string match "*11 -> 10*" $info] }
+
+        r select 10
+        create_big_tairhash_with_expire exk1 20 2
+        create_big_tairhash_with_expire exk2 20 2
+        create_big_tairhash_with_expire exk3 20 2
+
+        r swapdb 10 11
+        r swapdb 11 12
+        r swapdb 12 10
+
+        after 3000
+        assert_equal 0 [r dbsize]   
+        set info [r exhexpireinfo]
+        assert { [string match "*db: 10, unexpired_fields: 0, active_expired_fields: 60*db: 12, unexpired_fields: 0, active_expired_fields: 30*" $info] }
+        assert { [string match "*11 -> 10*12 -> 11*10 -> 12*" $info] }
+    }
 
     test {Reload after Exhset } {
         r del exhashkey
@@ -1616,6 +1712,7 @@ start_server {tags {"tairzset"} overrides {bind 0.0.0.0}} {
                 set exist_num [$slave exists exhashkey]
                 assert_equal 0 $exist_num
             }
+
             test {Exhexists} {
                 $master del exhashkey
 
@@ -1648,6 +1745,32 @@ start_server {tags {"tairzset"} overrides {bind 0.0.0.0}} {
 
                 set exist_num [$slave exhexists exhashkey field2]
                 assert_equal 0 $exist_num
+            }
+
+            test {SwapDB with active expire in replica} {
+                $master flushall
+                $master select 10
+                $master exhset exk1 f v ex 2
+                $master exhset exk2 f v ex 2
+                $master exhset exk3 f v ex 2
+
+                assert_equal 3 [$master dbsize]
+                $master swapdb 10 11
+                assert_equal 0 [$master dbsize]
+                $master select 11
+                assert_equal 3 [$master dbsize]
+
+                $master WAIT 1 5000
+
+                $slave select 11
+                assert_equal 3 [$slave dbsize]
+
+                after 3000
+                assert_equal 0 [$master dbsize]   
+                assert_equal 0 [$slave dbsize]   
+
+                set info [$slave exhexpireinfo]
+                assert { [string match "*11 -> 10*" $info] }
             }
         }
     }

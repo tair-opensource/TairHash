@@ -40,8 +40,9 @@ m_zskiplist *m_zslCreate(void) {
 void m_zslFreeNode(m_zskiplistNode *node) {
     // if (node->key)
     //     RedisModule_FreeString(NULL, node->key);
-    if (node->field)
+    if (node->field) {
         RedisModule_FreeString(NULL, node->field);
+    }
     RedisModule_Free(node);
 }
 

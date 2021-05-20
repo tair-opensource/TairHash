@@ -499,7 +499,7 @@ int exhashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int a
         return REDISMODULE_ERR;
     }
 
-    // TODO: expire <= 0
+    // TODO: process expire <= 0
 
     RedisModuleString *version_p = NULL;
     int ex_flags = EX_HASH_SET_NO_FLAGS;
@@ -2630,6 +2630,15 @@ void TairHashTypeFree(void *value) {
     }
 }
 
+size_t TairHashTypeEffort(RedisModuleString *key, const void *value) {
+    REDISMODULE_NOT_USED(key);
+    exHashObj *o = (exHashObj *)value;
+
+    // TODO: include skiplist free effort
+
+    return dictSize(o->hash);
+}
+
 void TairHashTypeDigest(RedisModuleDigest *md, void *value) {
     exHashObj *o = (exHashObj *)value;
 
@@ -2756,6 +2765,7 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         .aof_rewrite = TairHashTypeAofRewrite,
         .mem_usage = TairHashTypeMemUsage,
         .free = TairHashTypeFree,
+        .free_effort = TairHashTypeEffort,
         .digest = TairHashTypeDigest,
     };
 

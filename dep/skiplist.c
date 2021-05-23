@@ -8,11 +8,10 @@
 
 /* Create a skiplist node with the specified number of levels.
  * The SDS string 'ele' is referenced by the node after the call. */
-m_zskiplistNode *m_zslCreateNode(int level, long long score, RedisModuleString *key, RedisModuleString *field) {
+m_zskiplistNode *m_zslCreateNode(int level, long long score, RedisModuleString *member) {
     m_zskiplistNode *zn = RedisModule_Alloc(sizeof(*zn) + level * sizeof(struct zskiplistLevel));
     zn->score = score;
-    zn->key = key;
-    zn->field = field;
+    zn->member = member;
     return zn;
 }
 
@@ -24,7 +23,7 @@ m_zskiplist *m_zslCreate(void) {
     zsl = RedisModule_Alloc(sizeof(*zsl));
     zsl->level = 1;
     zsl->length = 0;
-    zsl->header = m_zslCreateNode(ZSKIPLIST_MAXLEVEL, 0, NULL, NULL);
+    zsl->header = m_zslCreateNode(ZSKIPLIST_MAXLEVEL, 0, NULL);
     for (j = 0; j < ZSKIPLIST_MAXLEVEL; j++) {
         zsl->header->level[j].forward = NULL;
         zsl->header->level[j].span = 0;
@@ -38,10 +37,9 @@ m_zskiplist *m_zslCreate(void) {
  * of the element is freed too, unless node->ele is set to NULL before calling
  * this function. */
 void m_zslFreeNode(m_zskiplistNode *node) {
-    // if (node->key)
-    //     RedisModule_FreeString(NULL, node->key);
-    if (node->field) {
-        RedisModule_FreeString(NULL, node->field);
+    // TODO:
+    if (node->member) {
+        RedisModule_FreeString(NULL, node->member);
     }
     RedisModule_Free(node);
 }
@@ -73,7 +71,7 @@ int m_zslRandomLevel(void) {
 /* Insert a new node in the skiplist. Assumes the element does not already
  * exist (up to the caller to enforce that). The skiplist takes ownership
  * of the passed SDS string 'ele'. */
-m_zskiplistNode *m_zslInsert(m_zskiplist *zsl, long long score, RedisModuleString *key, RedisModuleString *field) {
+m_zskiplistNode *m_zslInsert(m_zskiplist *zsl, long long score, RedisModuleString *member) {
     m_zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
     unsigned int rank[ZSKIPLIST_MAXLEVEL];
     int i, level;
@@ -84,8 +82,7 @@ m_zskiplistNode *m_zslInsert(m_zskiplist *zsl, long long score, RedisModuleStrin
         rank[i] = i == (zsl->level - 1) ? 0 : rank[i + 1];
         while (x->level[i].forward && 
             (x->level[i].forward->score < score || 
-            (x->level[i].forward->score == score && RedisModule_StringCompare(x->level[i].forward->key, key) < 0) || 
-            (x->level[i].forward->score == score && RedisModule_StringCompare(x->level[i].forward->key, key) == 0 && RedisModule_StringCompare(x->level[i].forward->field, field) < 0))) {
+            (x->level[i].forward->score == score && RedisModule_StringCompare(x->level[i].forward->member, member) < 0))) {
             rank[i] += x->level[i].span;
             x = x->level[i].forward;
         }
@@ -105,7 +102,7 @@ m_zskiplistNode *m_zslInsert(m_zskiplist *zsl, long long score, RedisModuleStrin
         }
         zsl->level = level;
     }
-    x = m_zslCreateNode(level, score, key, field);
+    x = m_zslCreateNode(level, score, member);
     for (i = 0; i < level; i++) {
         x->level[i].forward = update[i]->level[i].forward;
         update[i]->level[i].forward = x;
@@ -158,7 +155,7 @@ void m_zslDeleteNode(m_zskiplist *zsl, m_zskiplistNode *x, m_zskiplistNode **upd
  * it is not freed (but just unlinked) and *node is set to the node pointer,
  * so that it is possible for the caller to reuse the node (including the
  * referenced SDS string at node->ele). */
-int m_zslDelete(m_zskiplist *zsl, long long score, RedisModuleString *key, RedisModuleString *field, m_zskiplistNode **node) {
+int m_zslDelete(m_zskiplist *zsl, long long score, RedisModuleString *member, m_zskiplistNode **node) {
     m_zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
     int i;
 
@@ -166,8 +163,7 @@ int m_zslDelete(m_zskiplist *zsl, long long score, RedisModuleString *key, Redis
     for (i = zsl->level - 1; i >= 0; i--) {
         while (x->level[i].forward && 
         (x->level[i].forward->score < score || 
-        (x->level[i].forward->score == score && RedisModule_StringCompare(x->level[i].forward->key, key) < 0) || 
-        (x->level[i].forward->score == score && RedisModule_StringCompare(x->level[i].forward->key, key) == 0 && RedisModule_StringCompare(x->level[i].forward->field, field) < 0))) {
+        (x->level[i].forward->score == score && RedisModule_StringCompare(x->level[i].forward->member, member) < 0))) {
             x = x->level[i].forward;
         }
         update[i] = x;
@@ -175,7 +171,7 @@ int m_zslDelete(m_zskiplist *zsl, long long score, RedisModuleString *key, Redis
     /* We may have multiple elements with the same score, what we need
      * is to find the element with both the right score and object. */
     x = x->level[0].forward;
-    if (x && score == x->score && RedisModule_StringCompare(x->key, key) == 0 && RedisModule_StringCompare(x->field, field) == 0) {
+    if (x && score == x->score && RedisModule_StringCompare(x->member, member) == 0) {
         m_zslDeleteNode(zsl, x, update);
         if (!node)
             m_zslFreeNode(x);
@@ -197,7 +193,7 @@ int m_zslDelete(m_zskiplist *zsl, long long score, RedisModuleString *key, Redis
  * element, which is more costly.
  *
  * The function returns the updated element skiplist node pointer. */
-m_zskiplistNode *m_zslUpdateScore(m_zskiplist *zsl, long long  curscore, RedisModuleString *key, RedisModuleString *field, long long  newscore) {
+m_zskiplistNode *m_zslUpdateScore(m_zskiplist *zsl, long long  curscore, RedisModuleString *member, long long  newscore) {
     m_zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
     int i;
 
@@ -207,8 +203,7 @@ m_zskiplistNode *m_zslUpdateScore(m_zskiplist *zsl, long long  curscore, RedisMo
     for (i = zsl->level - 1; i >= 0; i--) {
         while (x->level[i].forward && 
             (x->level[i].forward->score < curscore || 
-            (x->level[i].forward->score == curscore && RedisModule_StringCompare(x->level[i].forward->key, key) < 0) || 
-            (x->level[i].forward->score == curscore && RedisModule_StringCompare(x->level[i].forward->key, key) == 0 && RedisModule_StringCompare(x->level[i].forward->field, field) < 0))) {
+            (x->level[i].forward->score == curscore && RedisModule_StringCompare(x->level[i].forward->member, member) < 0))) {
             x = x->level[i].forward;
         }
         update[i] = x;
@@ -217,7 +212,7 @@ m_zskiplistNode *m_zslUpdateScore(m_zskiplist *zsl, long long  curscore, RedisMo
     /* Jump to our element: note that this function assumes that the
      * element with the matching score exists. */
     x = x->level[0].forward;
-    assert(x && curscore == x->score && RedisModule_StringCompare(x->key, key) == 0 && RedisModule_StringCompare(x->field, field) == 0);
+    assert(x && curscore == x->score && RedisModule_StringCompare(x->member, member) == 0);
 
     /* If the node, after the score update, would be still exactly
      * at the same position, we can just update the score without
@@ -230,11 +225,10 @@ m_zskiplistNode *m_zslUpdateScore(m_zskiplist *zsl, long long  curscore, RedisMo
     /* No way to reuse the old node: we need to remove and insert a new
      * one at a different place. */
     m_zslDeleteNode(zsl, x, update);
-    m_zskiplistNode *newnode = m_zslInsert(zsl, newscore, x->key, x->field);
+    m_zskiplistNode *newnode = m_zslInsert(zsl, newscore, x->member);
     /* We reused the old node x->ele SDS string, free the node now
      * since m_zslInsert created a new one. */
-    x->key = NULL;
-    x->field = NULL;
+    x->member = NULL;
     m_zslFreeNode(x);
     return newnode;
 }

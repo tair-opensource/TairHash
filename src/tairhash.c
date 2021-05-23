@@ -95,23 +95,43 @@ inline RedisModuleString *takeAndRef(RedisModuleString *str) {
 #define MUTEX_LOCK(dbid) pthread_mutex_lock(&zsl_lk[dbid])
 #define MUTEX_UNLOCK(dbid) pthread_mutex_unlock(&zsl_lk[dbid])
 
-#define ACTIVE_EXPIRE_INSERT(dbid, key, field, expire)              \
-    if (enable_active_expire) {                                     \
-        if (expire) {                                               \
-            MUTEX_LOCK(dbid);                                       \
-            m_zslInsert(zsl[dbid], expire, key, takeAndRef(field)); \
-            MUTEX_UNLOCK(dbid);                                     \
-        }                                                           \
-    }
+#define ACTIVE_EXPIRE_INSERT(o, field, expire)                                                 \
+    do {                                                                                       \
+        if (enable_active_expire) {                                                            \
+            if (expire) {                                                                      \
+                long long before_min_score = -1;                                               \
+                if (o->zsl->header->level[0].forward) {                                        \
+                    before_min_score = o->zsl->header->level[0].forward->score;                \
+                }                                                                              \
+                m_zslInsert(o->zsl, expire, takeAndRef(field));                                \
+                long long after_min_score = o->zsl->header->level[0].forward->score;           \
+                MUTEX_LOCK(o->dbid);                                                           \
+                if (before_min_score > 0) {                                                    \
+                    m_zslUpdateScore(zsl[o->dbid], before_min_score, o->key, after_min_score); \
+                } else {                                                                       \
+                    m_zslInsert(zsl[o->dbid], after_min_score, takeAndRef(o->key));            \
+                }                                                                              \
+                MUTEX_UNLOCK(o->dbid);                                                         \
+            }                                                                                  \
+        }                                                                                      \
+    } while (0)
 
-#define ACTIVE_EXPIRE_UPDATE(dbid, key, field, cur_expire, new_expire)       \
-    if (enable_active_expire) {                                              \
-        if (cur_expire != new_expire) {                                      \
-            MUTEX_LOCK(dbid);                                                \
-            m_zslUpdateScore(zsl[dbid], cur_expire, key, field, new_expire); \
-            MUTEX_UNLOCK(dbid);                                              \
-        }                                                                    \
-    }
+#define ACTIVE_EXPIRE_UPDATE(o, field, cur_expire, new_expire)                             \
+    do {                                                                                   \
+        if (enable_active_expire) {                                                        \
+            if (cur_expire != new_expire) {                                                \
+                long long before_min_score = -1;                                           \
+                m_zskiplistNode *ln = o->zsl->header->level[0].forward;                    \
+                assert(ln != NULL);                                                        \
+                before_min_score = ln->score;                                              \
+                m_zslUpdateScore(o->zsl, cur_expire, field, new_expire);                   \
+                long long after_min_score = o->zsl->header->level[0].forward->score;       \
+                MUTEX_LOCK(o->dbid);                                                       \
+                m_zslUpdateScore(zsl[o->dbid], before_min_score, o->key, after_min_score); \
+                MUTEX_UNLOCK(o->dbid);                                                     \
+            }                                                                              \
+        }                                                                                  \
+    } while (0)
 
 /* ========================== Internal data structure  =======================*/
 typedef struct exHashVal {
@@ -134,8 +154,10 @@ static void exHashValRelease(struct exHashVal *o) {
         RedisModule_Free(o);
     }
 }
+
 typedef struct exHashObj {
     dict *hash;
+    m_zskiplist *zsl;
     unsigned int dbid;  // logic dbid
     RedisModuleString *key;
 } exHashObj;
@@ -203,19 +225,17 @@ m_dictType tairhashDictType = {
 };
 
 static void exHashTypeReleaseObject(struct exHashObj *o) {
-    m_dictIterator *di;
-    m_dictEntry *de;
-    di = m_dictGetIterator(o->hash);
-    while ((de = m_dictNext(di)) != NULL) {
-        if (((exHashVal *)dictGetVal(de))->expire) {
-            MUTEX_LOCK(o->dbid);
-            m_zslDelete(zsl[o->dbid], ((exHashVal *)dictGetVal(de))->expire, o->key, dictGetKey(de), NULL);
-            MUTEX_UNLOCK(o->dbid);
-        }
+    if (o->zsl->header->level[0].forward) {
+        MUTEX_LOCK(o->dbid);
+        m_zslDelete(zsl[o->dbid], o->zsl->header->level[0].forward->score, o->key, NULL);
+        MUTEX_UNLOCK(o->dbid);
     }
-    m_dictReleaseIterator(di);
+
     m_dictRelease(o->hash);
-    RedisModule_FreeString(NULL, o->key);
+    m_zslFree(o->zsl);
+    if (o->key) {
+        RedisModule_FreeString(NULL, o->key);
+    }
     RedisModule_Free(o);
 }
 
@@ -240,7 +260,6 @@ inline static int expireTairHashObjIfNeeded(RedisModuleCtx *ctx, RedisModuleStri
     if (ex_hash_val == NULL) {
         return 0;
     }
-
     long long when = ex_hash_val->expire;
     long long now;
 
@@ -262,9 +281,19 @@ inline static int expireTairHashObjIfNeeded(RedisModuleCtx *ctx, RedisModuleStri
     RedisModuleString *key_dup = RedisModule_CreateStringFromString(NULL, key);
     RedisModuleString *field_dup = RedisModule_CreateStringFromString(NULL, field);
     if (!is_timer) {
-        MUTEX_LOCK(o->dbid);
-        m_zslDelete(zsl[o->dbid], when, key_dup, field_dup, NULL);
-        MUTEX_UNLOCK(o->dbid);
+        long long before_min_score = o->zsl->header->level[0].forward->score;
+        m_zslDelete(o->zsl, when, field_dup, NULL);
+        long long after_min_score;
+        if (o->zsl->header->level[0].forward != NULL) {
+            after_min_score = o->zsl->header->level[0].forward->score;
+            MUTEX_LOCK(o->dbid);
+            m_zslUpdateScore(zsl[o->dbid], before_min_score, key, after_min_score);
+            MUTEX_UNLOCK(o->dbid);
+        } else {
+            MUTEX_LOCK(o->dbid);
+            m_zslDelete(zsl[o->dbid], before_min_score, key, NULL);
+            MUTEX_UNLOCK(o->dbid);
+        }
     }
     m_dictDelete(o->hash, field);
     RedisModule_Replicate(ctx, "EXHDEL", "ss", key_dup, field_dup);
@@ -314,59 +343,112 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
     }
 
     int start_index;
-    m_zskiplistNode *ln = NULL;
+    m_zskiplistNode *ln = NULL, *ln2 = NULL;
 
     RedisModuleString *key, *field;
     RedisModuleKey *real_key;
 
+    long long when, now;
+    unsigned long zsl_len;
+
     long long start = mstime();
     for (; i < dbs_per_call; ++i) {
-        int psydb = (current_db % DB_NUM);
+        int psydb = current_db % DB_NUM;
         int logicdb = phy2logic_dbmap[psydb];
 
-        int range_len = ex_hash_active_expire_keys_per_loop;
+        int expire_keys_per_loop = ex_hash_active_expire_keys_per_loop;
+
+        /* 1. The current db does not have a key that needs to expire */
         MUTEX_LOCK(logicdb);
-        unsigned long zsl_len = zsl[logicdb]->length;
-        range_len = range_len > zsl_len ? zsl_len : range_len;
-        if (range_len == 0) {
+        zsl_len = zsl[logicdb]->length;
+        if (zsl_len == 0) {
             MUTEX_UNLOCK(logicdb);
             current_db++;
             continue;
         }
 
-        /* Must use real pysical dbid. */
-        RedisModule_SelectDb(ctx, psydb);
+        /* 2. Enumerates expired keys */
+        list *keys = m_listCreate();
         ln = zsl[logicdb]->header->level[0].forward;
         start_index = 0;
-        while (range_len--) {
-            key = ln->key;
-            field = ln->field;
-
-            real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE);
-            int type = RedisModule_KeyType(real_key);
-            /* value may be being Lazyfree, here we can safely release this node in advance. */
-            if (type == REDISMODULE_KEYTYPE_EMPTY) {
-                start_index++;
-            } else {
-                assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
-
-                ex_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
-                if (expireTairHashObjIfNeeded(ctx, key, ex_hash_obj, field, 1)) {
-                    stat_expired_field[logicdb]++;
-                    start_index++;
-                    delEmptyExhashIfNeeded(ctx, real_key, key, ex_hash_obj);
-                } else {
-                    break;
-                }
+        while (ln && expire_keys_per_loop--) {
+            key = ln->member;
+            when = ln->score;
+            now = mstime();
+            if (when > now) {
+                break;
             }
+            start_index++;
+            m_listAddNodeTail(keys, key);
             ln = ln->level[0].forward;
         }
 
         if (start_index) {
+            /* It is assumed that these keys will all be deleted */
             m_zslDeleteRangeByRank(zsl[logicdb], 1, start_index);
         }
 
         MUTEX_UNLOCK(logicdb);
+
+        if (listLength(keys) == 0) {
+            m_listRelease(keys);
+            current_db++;
+            continue;
+        }
+
+        /* 3. Delete expired field */
+        expire_keys_per_loop = ex_hash_active_expire_keys_per_loop;
+
+        /* Must use real pysical dbid. */
+        RedisModule_SelectDb(ctx, psydb);
+
+        m_listNode *node;
+        while ((node = listFirst(keys)) != NULL) {
+            key = listNodeValue(node);
+            real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE);
+            int type = RedisModule_KeyType(real_key);
+            if (type == REDISMODULE_KEYTYPE_EMPTY) {
+                /* value may be being Lazyfree, here we can safely skip this key. */
+            } else {
+                assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
+                ex_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
+
+                zsl_len = ex_hash_obj->zsl->length;
+                assert(zsl_len > 0);
+
+                ln2 = ex_hash_obj->zsl->header->level[0].forward;
+                start_index = 0;
+                while (ln2 && expire_keys_per_loop) {
+                    field = ln2->member;
+                    if (expireTairHashObjIfNeeded(ctx, key, ex_hash_obj, field, 1)) {
+                        stat_expired_field[logicdb]++;
+                        start_index++;
+                        expire_keys_per_loop--;
+                    } else {
+                        break;
+                    }
+                    ln2 = ln2->level[0].forward;
+                }
+
+                if (start_index) {
+                    m_zslDeleteRangeByRank(ex_hash_obj->zsl, 1, start_index);
+                    delEmptyExhashIfNeeded(ctx, real_key, key, ex_hash_obj);
+                }
+
+                /* If there is still a field waiting to expire and delete, re-insert it to the global sort */
+                if (ln2) {
+                    MUTEX_LOCK(logicdb);
+                    m_zslInsert(zsl[logicdb], ln2->score, takeAndRef(ex_hash_obj->key));
+                    MUTEX_UNLOCK(logicdb);
+                }
+            }
+
+            m_listDelNode(keys, node);
+        }
+
+        m_listRelease(keys);
+
+        /* 4. Next db */
         current_db++;
     }
 
@@ -390,6 +472,7 @@ restart:
 void swapDbCallback(RedisModuleCtx *ctx, RedisModuleEvent e, uint64_t sub, void *data) {
     REDISMODULE_NOT_USED(e);
     REDISMODULE_NOT_USED(sub);
+    RedisModule_AutoMemory(ctx);
 
     RedisModuleSwapDbInfo *ei = data;
 
@@ -409,6 +492,101 @@ void swapDbCallback(RedisModuleCtx *ctx, RedisModuleEvent e, uint64_t sub, void 
     MUTEX_UNLOCK(cur_logic_db2);
 }
 
+static int keySpaceNotification(RedisModuleCtx *ctx, int type, const char *event, RedisModuleString *key) {
+    REDISMODULE_NOT_USED(ctx);
+    REDISMODULE_NOT_USED(type);
+    RedisModule_AutoMemory(ctx);
+
+#define CMD_NONE 0
+#define CMD_RENAME 1
+#define CMD_MOVE 2
+
+    static RedisModuleString *from_key = NULL, *to_key = NULL;
+    static int from_dbid, to_dbid;
+    static int cmd_flag = CMD_NONE;
+
+    int dbid = RedisModule_GetSelectedDb(ctx);
+
+    if (strcmp(event, "rename_from") == 0) {
+        from_key = RedisModule_CreateStringFromString(NULL, key);
+    } else if (strcmp(event, "rename_to") == 0) {
+        to_key = RedisModule_CreateStringFromString(NULL, key);
+        cmd_flag = CMD_RENAME;
+    } else if (strcmp(event, "move_from") == 0) {
+        from_dbid = dbid;
+    } else if (strcmp(event, "move_to") == 0) {
+        to_dbid = dbid;
+        cmd_flag = CMD_MOVE;
+    }
+
+    if (cmd_flag != CMD_NONE) {
+        static RedisModuleString *local_from_key = NULL, *local_to_key = NULL;
+        int local_from_dbid, local_to_dbid;
+        if (cmd_flag == CMD_RENAME) {
+            local_from_key = from_key;
+            local_to_key = to_key;
+            local_from_dbid = dbid;
+            local_to_dbid = dbid;
+        } else {
+            local_from_key = key;
+            local_to_key = key;
+            local_from_dbid = from_dbid;
+            local_to_dbid = to_dbid;
+        }
+
+        RedisModule_SelectDb(ctx, local_to_dbid);
+        RedisModuleKey *real_key = RedisModule_OpenKey(ctx, local_to_key, REDISMODULE_READ | REDISMODULE_WRITE);
+        int type = RedisModule_KeyType(real_key);
+        assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
+        exHashObj *ex_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
+
+        /* Nothting todo */
+        if (ex_hash_obj->zsl->length == 0) {
+            return REDISMODULE_OK;
+        }
+
+        if (local_from_dbid != local_to_dbid) {
+            MUTEX_LOCK(phy2logic_dbmap[local_from_dbid]);
+            MUTEX_LOCK(phy2logic_dbmap[local_to_dbid]);
+        } else {
+            MUTEX_LOCK(phy2logic_dbmap[local_from_dbid]);
+        }
+
+        /* Delete the previous index */
+        m_zslDelete(zsl[phy2logic_dbmap[local_from_dbid]], ex_hash_obj->zsl->header->level[0].forward->score, local_from_key, NULL);
+        if (ex_hash_obj->key) {
+            /* Change key name */
+            RedisModule_FreeString(NULL, ex_hash_obj->key);
+            ex_hash_obj->key = RedisModule_CreateStringFromString(NULL, local_to_key);
+        }
+        /* Re-insert index */
+        m_zslInsert(zsl[phy2logic_dbmap[local_to_dbid]], ex_hash_obj->zsl->header->level[0].forward->score, takeAndRef(ex_hash_obj->key));
+
+        if (local_from_dbid != local_to_dbid) {
+            MUTEX_UNLOCK(phy2logic_dbmap[local_from_dbid]);
+            MUTEX_UNLOCK(phy2logic_dbmap[local_to_dbid]);
+        } else {
+            MUTEX_UNLOCK(phy2logic_dbmap[local_from_dbid]);
+        }
+
+        if (cmd_flag == CMD_RENAME) {
+            if (to_key) {
+                RedisModule_FreeString(NULL, to_key);
+                to_key = NULL;
+            }
+
+            if (from_key) {
+                RedisModule_FreeString(NULL, from_key);
+                from_key = NULL;
+            }
+        }
+
+        cmd_flag = CMD_NONE;
+    }
+
+    return REDISMODULE_OK;
+}
+
 void startExpireTimer(RedisModuleCtx *ctx, void *data) {
     if (!enable_active_expire) {
         return;
@@ -425,36 +603,36 @@ inline static void latencySensitivePassiveExpire(RedisModuleCtx *ctx, unsigned i
     exHashObj *ex_hash_obj = NULL;
 
     int keys_per_loop = ex_hash_passive_expire_keys_per_loop;
-
+    long long when, now;
     int start_index = 0;
     m_zskiplistNode *ln = NULL;
 
     RedisModuleString *key, *field;
-
+    RedisModuleKey *real_key;
+    /* 1. The current db does not have a key that needs to expire */
     MUTEX_LOCK(dbid);
     unsigned long zsl_len = zsl[dbid]->length;
-    keys_per_loop = keys_per_loop > zsl_len ? zsl_len : keys_per_loop;
+    zsl_len = zsl[dbid]->length;
+    if (zsl_len == 0) {
+        MUTEX_UNLOCK(dbid);
+        return;
+    }
 
+    /* Reuse the current time for fields */
+    now = mstime();
+
+    /* 2. Enumerates expired keys */
+    list *keys = m_listCreate();
     ln = zsl[dbid]->header->level[0].forward;
-    while (keys_per_loop--) {
-        key = ln->key;
-        field = ln->field;
-
-        RedisModuleKey *real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE);
-        int type = RedisModule_KeyType(real_key);
-        /* value may be being Lazyfree, here we can safely release this node in advance. */
-        if (type == REDISMODULE_KEYTYPE_EMPTY) {
-            start_index++;
-        } else {
-            assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
-
-            ex_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
-            if (expireTairHashObjIfNeeded(ctx, key, ex_hash_obj, field, 1)) {
-                start_index++;
-            } else {
-                break;
-            }
+    start_index = 0;
+    while (ln && keys_per_loop--) {
+        key = ln->member;
+        when = ln->score;
+        if (when > now) {
+            break;
         }
+        start_index++;
+        m_listAddNodeTail(keys, key);
         ln = ln->level[0].forward;
     }
 
@@ -462,6 +640,57 @@ inline static void latencySensitivePassiveExpire(RedisModuleCtx *ctx, unsigned i
         m_zslDeleteRangeByRank(zsl[dbid], 1, start_index);
     }
     MUTEX_UNLOCK(dbid);
+
+    if (listLength(keys) == 0) {
+        m_listRelease(keys);
+        return;
+    }
+
+    /* 3. Delete expired field */
+    keys_per_loop = ex_hash_passive_expire_keys_per_loop;
+    m_listNode *node;
+    while ((node = listFirst(keys)) != NULL) {
+        key = listNodeValue(node);
+        real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE);
+        int type = RedisModule_KeyType(real_key);
+        if (type == REDISMODULE_KEYTYPE_EMPTY) {
+            /* value may be being Lazyfree, here we can safely skip this key. */
+        } else {
+            assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
+            ex_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
+
+            zsl_len = ex_hash_obj->zsl->length;
+            assert(zsl_len > 0);
+
+            start_index = 0;
+            ln = ex_hash_obj->zsl->header->level[0].forward;
+            while (ln && keys_per_loop) {
+                field = ln->member;
+                if (expireTairHashObjIfNeeded(ctx, key, ex_hash_obj, field, 1)) {
+                    start_index++;
+                    keys_per_loop--;
+                } else {
+                    break;
+                }
+                ln = ln->level[0].forward;
+            }
+
+            if (start_index) {
+                m_zslDeleteRangeByRank(ex_hash_obj->zsl, 1, start_index);
+                delEmptyExhashIfNeeded(ctx, real_key, key, ex_hash_obj);
+            }
+
+            if (ln) {
+                MUTEX_LOCK(dbid);
+                m_zslInsert(zsl[dbid], ln->score, takeAndRef(ex_hash_obj->key));
+                MUTEX_UNLOCK(dbid);
+            }
+        }
+
+        m_listDelNode(keys, node);
+    }
+
+    m_listRelease(keys);
 }
 
 static int rsStrcasecmp(const RedisModuleString *rs1, const char *s2) {
@@ -574,9 +803,9 @@ int exhashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int a
         milliseconds += basetime;
         if (milliseconds > 0) {
             if (nokey || ex_hash_val->expire == 0) {
-                ACTIVE_EXPIRE_INSERT(ex_hash_obj->dbid, ex_hash_obj->key, skey, milliseconds);
+                ACTIVE_EXPIRE_INSERT(ex_hash_obj, skey, milliseconds);
             } else {
-                ACTIVE_EXPIRE_UPDATE(ex_hash_obj->dbid, ex_hash_obj->key, skey, ex_hash_val->expire, milliseconds)
+                ACTIVE_EXPIRE_UPDATE(ex_hash_obj, skey, ex_hash_val->expire, milliseconds);
             }
             ex_hash_val->expire = milliseconds;
         }
@@ -683,6 +912,8 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
     int ex_flags = EX_HASH_SET_NO_FLAGS;
     int nokey = 0;
 
+    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
+
     RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
     int type = RedisModule_KeyType(key);
     if (REDISMODULE_KEYTYPE_EMPTY != type && RedisModule_ModuleTypeGetType(key) != TairHashType) {
@@ -748,8 +979,6 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         return REDISMODULE_ERR;
     }
 
-    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
-
     RedisModuleString *pkey = argv[1], *skey = argv[2];
 
     exHashObj *ex_hash_obj = NULL;
@@ -760,6 +989,7 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         }
         ex_hash_obj = createTairHashTypeObject();
         ex_hash_obj->hash = m_dictCreate(&tairhashDictType, NULL);
+        ex_hash_obj->zsl = m_zslCreate();
         ex_hash_obj->dbid = phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)];
         ex_hash_obj->key = RedisModule_CreateStringFromString(NULL, pkey);
         RedisModule_ModuleTypeSetValue(key, TairHashType, ex_hash_obj);
@@ -812,9 +1042,9 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
 
     if (milliseconds > 0) {
         if (nokey || ex_hash_val->expire == 0) {
-            ACTIVE_EXPIRE_INSERT(ex_hash_obj->dbid, ex_hash_obj->key, skey, milliseconds);
+            ACTIVE_EXPIRE_INSERT(ex_hash_obj, skey, milliseconds);
         } else {
-            ACTIVE_EXPIRE_UPDATE(ex_hash_obj->dbid, ex_hash_obj->key, skey, ex_hash_val->expire, milliseconds)
+            ACTIVE_EXPIRE_UPDATE(ex_hash_obj, skey, ex_hash_val->expire, milliseconds);
         }
         ex_hash_val->expire = milliseconds;
     }
@@ -843,6 +1073,8 @@ int TairHashTypeHsetNx_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **arg
         return RedisModule_WrongArity(ctx);
     }
 
+    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
+
     RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
     int type = RedisModule_KeyType(key);
     if (REDISMODULE_KEYTYPE_EMPTY != type && RedisModule_ModuleTypeGetType(key) != TairHashType) {
@@ -850,14 +1082,13 @@ int TairHashTypeHsetNx_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **arg
         return REDISMODULE_ERR;
     }
 
-    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
-
     RedisModuleString *pkey = argv[1], *skey = argv[2], *svalue = argv[3];
 
     exHashObj *ex_hash_obj = NULL;
     if (type == REDISMODULE_KEYTYPE_EMPTY) {
         ex_hash_obj = createTairHashTypeObject();
         ex_hash_obj->hash = m_dictCreate(&tairhashDictType, NULL);
+        ex_hash_obj->zsl = m_zslCreate();
         ex_hash_obj->dbid = phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)];
         ex_hash_obj->key = RedisModule_CreateStringFromString(NULL, pkey);
         RedisModule_ModuleTypeSetValue(key, TairHashType, ex_hash_obj);
@@ -868,6 +1099,7 @@ int TairHashTypeHsetNx_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **arg
     exHashVal *ex_hash_val = (exHashVal *)m_dictFetchValue(ex_hash_obj->hash, skey);
     if (ex_hash_val == NULL) {
         ex_hash_val = createExhashVal();
+        ex_hash_val->expire = 0;
     } else {
         RedisModule_ReplyWithLongLong(ctx, 0);
         return REDISMODULE_OK;
@@ -889,6 +1121,8 @@ int TairHashTypeHmset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
         return RedisModule_WrongArity(ctx);
     }
 
+    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
+
     int nokey;
     RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
     int type = RedisModule_KeyType(key);
@@ -897,12 +1131,11 @@ int TairHashTypeHmset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
         return REDISMODULE_ERR;
     }
 
-    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
-
     exHashObj *ex_hash_obj = NULL;
     if (type == REDISMODULE_KEYTYPE_EMPTY) {
         ex_hash_obj = createTairHashTypeObject();
         ex_hash_obj->hash = m_dictCreate(&tairhashDictType, NULL);
+        ex_hash_obj->zsl = m_zslCreate();
         ex_hash_obj->dbid = phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)];
         ex_hash_obj->key = RedisModule_CreateStringFromString(NULL, argv[1]);
         RedisModule_ModuleTypeSetValue(key, TairHashType, ex_hash_obj);
@@ -916,10 +1149,7 @@ int TairHashTypeHmset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
         if (ex_hash_val == NULL) {
             nokey = 1;
             ex_hash_val = createExhashVal();
-            if (ex_hash_val == NULL) {
-                RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
-                return REDISMODULE_ERR;
-            }
+            ex_hash_val->expire = 0;
         } else {
             if (ex_hash_val->value) {
                 RedisModule_FreeString(NULL, ex_hash_val->value);
@@ -945,6 +1175,8 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
         return RedisModule_WrongArity(ctx);
     }
 
+    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
+
     RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
     int type = RedisModule_KeyType(key);
     if (REDISMODULE_KEYTYPE_EMPTY != type && RedisModule_ModuleTypeGetType(key) != TairHashType) {
@@ -952,12 +1184,11 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
         return REDISMODULE_ERR;
     }
 
-    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
-
     exHashObj *ex_hash_obj = NULL;
     if (type == REDISMODULE_KEYTYPE_EMPTY) {
         ex_hash_obj = createTairHashTypeObject();
         ex_hash_obj->hash = m_dictCreate(&tairhashDictType, NULL);
+        ex_hash_obj->zsl = m_zslCreate();
         ex_hash_obj->dbid = phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)];
         ex_hash_obj->key = RedisModule_CreateStringFromString(NULL, argv[1]);
         RedisModule_ModuleTypeSetValue(key, TairHashType, ex_hash_obj);
@@ -1022,9 +1253,9 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
         if (when > 0) {
             when = mstime() + when * 1000;
             if (nokey || ex_hash_val->expire == 0) {
-                ACTIVE_EXPIRE_INSERT(ex_hash_obj->dbid, ex_hash_obj->key, argv[i], when);
+                ACTIVE_EXPIRE_INSERT(ex_hash_obj, argv[i], when);
             } else {
-                ACTIVE_EXPIRE_UPDATE(ex_hash_obj->dbid, ex_hash_obj->key, argv[i], ex_hash_val->expire, when)
+                ACTIVE_EXPIRE_UPDATE(ex_hash_obj, argv[i], ex_hash_val->expire, when);
             }
             ex_hash_val->expire = when;
         }
@@ -1135,14 +1366,14 @@ int TairHashTypeHsetVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         return REDISMODULE_ERR;
     }
 
+    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
+
     RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
     int type = RedisModule_KeyType(key);
     if (REDISMODULE_KEYTYPE_EMPTY != type && RedisModule_ModuleTypeGetType(key) != TairHashType) {
         RedisModule_ReplyWithError(ctx, REDISMODULE_ERRORMSG_WRONGTYPE);
         return REDISMODULE_ERR;
     }
-
-    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
 
     exHashObj *ex_hash_obj = NULL;
     if (type == REDISMODULE_KEYTYPE_EMPTY) {
@@ -1190,6 +1421,8 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     int j;
     int ex_flags = EX_HASH_SET_NO_FLAGS;
     int nokey;
+
+    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
 
     RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
     int type = RedisModule_KeyType(key);
@@ -1282,12 +1515,11 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
 
     RedisModuleString *pkey = argv[1], *skey = argv[2];
 
-    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
-
     exHashObj *ex_hash_obj = NULL;
     if (type == REDISMODULE_KEYTYPE_EMPTY) {
         ex_hash_obj = createTairHashTypeObject();
         ex_hash_obj->hash = m_dictCreate(&tairhashDictType, NULL);
+        ex_hash_obj->zsl = m_zslCreate();
         ex_hash_obj->dbid = phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)];
         ex_hash_obj->key = RedisModule_CreateStringFromString(NULL, pkey);
         RedisModule_ModuleTypeSetValue(key, TairHashType, ex_hash_obj);
@@ -1361,9 +1593,9 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
 
     if (milliseconds > 0) {
         if (nokey || ex_hash_val->expire == 0) {
-            ACTIVE_EXPIRE_INSERT(ex_hash_obj->dbid, ex_hash_obj->key, skey, milliseconds);
+            ACTIVE_EXPIRE_INSERT(ex_hash_obj, skey, milliseconds);
         } else {
-            ACTIVE_EXPIRE_UPDATE(ex_hash_obj->dbid, ex_hash_obj->key, skey, ex_hash_val->expire, milliseconds)
+            ACTIVE_EXPIRE_UPDATE(ex_hash_obj, skey, ex_hash_val->expire, milliseconds);
         }
         ex_hash_val->expire = milliseconds;
     }
@@ -1399,6 +1631,8 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
     int j;
     int ex_flags = EX_HASH_SET_NO_FLAGS;
     int nokey = 0;
+
+    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
 
     RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
     int type = RedisModule_KeyType(key);
@@ -1490,12 +1724,11 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
         return REDISMODULE_ERR;
     }
 
-    latencySensitivePassiveExpire(ctx, phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)]);
-
     exHashObj *ex_hash_obj = NULL;
     if (type == REDISMODULE_KEYTYPE_EMPTY) {
         ex_hash_obj = createTairHashTypeObject();
         ex_hash_obj->hash = m_dictCreate(&tairhashDictType, NULL);
+        ex_hash_obj->zsl = m_zslCreate();
         ex_hash_obj->dbid = phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)];
         ex_hash_obj->key = RedisModule_CreateStringFromString(NULL, argv[1]);
         RedisModule_ModuleTypeSetValue(key, TairHashType, ex_hash_obj);
@@ -1586,9 +1819,9 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
 
     if (milliseconds > 0) {
         if (nokey || ex_hash_val->expire == 0) {
-            ACTIVE_EXPIRE_INSERT(ex_hash_obj->dbid, ex_hash_obj->key, skey, milliseconds);
+            ACTIVE_EXPIRE_INSERT(ex_hash_obj, skey, milliseconds);
         } else {
-            ACTIVE_EXPIRE_UPDATE(ex_hash_obj->dbid, ex_hash_obj->key, skey, ex_hash_val->expire, milliseconds)
+            ACTIVE_EXPIRE_UPDATE(ex_hash_obj, skey, ex_hash_val->expire, milliseconds);
         }
         ex_hash_val->expire = milliseconds;
     }
@@ -1836,13 +2069,15 @@ int TairHashTypeHdel_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         return REDISMODULE_ERR;
     }
 
+    long long before_min_score, after_min_score;
+
     exHashObj *ex_hash_obj = NULL;
     if (type == REDISMODULE_KEYTYPE_EMPTY) {
         return RedisModule_ReplyWithLongLong(ctx, 0);
     } else {
         ex_hash_obj = RedisModule_ModuleTypeGetValue(key);
     }
-    int dbid = phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)];
+
     exHashVal *ex_hash_val = NULL;
     for (j = 2; j < argc; j++) {
         /* Internal will perform RedisModule_Replicate EXHDEL for replication */
@@ -1850,10 +2085,23 @@ int TairHashTypeHdel_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         m_dictEntry *de = m_dictFind(ex_hash_obj->hash, argv[j]);
         if (de) {
             ex_hash_val = dictGetVal(de);
-            MUTEX_LOCK(dbid);
-            m_zslDelete(zsl[dbid], ex_hash_val->expire, argv[1], argv[j], NULL);
-            MUTEX_UNLOCK(dbid);
+            if (ex_hash_val->expire > 0) {
+                assert(ex_hash_obj->zsl->header->level[0].forward != NULL);
+                before_min_score = ex_hash_obj->zsl->header->level[0].forward->score;
+                m_zslDelete(ex_hash_obj->zsl, ex_hash_val->expire, argv[j], NULL);
+                if (ex_hash_obj->zsl->header->level[0].forward) {
+                    after_min_score = ex_hash_obj->zsl->header->level[0].forward->score;
+                    MUTEX_LOCK(ex_hash_obj->dbid);
+                    m_zslUpdateScore(zsl[ex_hash_obj->dbid], before_min_score, argv[1], after_min_score);
+                    MUTEX_UNLOCK(ex_hash_obj->dbid);
+                } else {
+                    MUTEX_LOCK(ex_hash_obj->dbid);
+                    m_zslDelete(zsl[ex_hash_obj->dbid], before_min_score, argv[1], NULL);
+                    MUTEX_UNLOCK(ex_hash_obj->dbid);
+                }
+            }
             m_dictDelete(ex_hash_obj->hash, argv[j]);
+
             RedisModule_Replicate(ctx, "EXHDEL", "ss", argv[1], argv[j]);
             deleted++;
         }
@@ -1908,20 +2156,30 @@ int TairHashTypeHdelWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString 
         }
 
         /* Internal will perform RedisModule_Replicate EXHDEL for replication */
-        if (expireTairHashObjIfNeeded(ctx, argv[1], ex_hash_obj, argv[j], 0)) {
-            field_expired = 1;
-        }
-        int dbid = phy2logic_dbmap[RedisModule_GetSelectedDb(ctx)];
+        expireTairHashObjIfNeeded(ctx, argv[1], ex_hash_obj, argv[j], 0);
+
+        long long before_min_score, after_min_score;
         exHashVal *ex_hash_val = (exHashVal *)m_dictFetchValue(ex_hash_obj->hash, argv[j]);
         if (ex_hash_val != NULL) {
             if (ver == 0 || ver == ex_hash_val->version) {
-                if (m_dictDelete(ex_hash_obj->hash, argv[j]) == DICT_OK) {
-                    MUTEX_LOCK(dbid);
-                    m_zslDelete(zsl[dbid], ex_hash_val->expire, argv[1], argv[j], NULL);
-                    MUTEX_UNLOCK(dbid);
-                    RedisModule_Replicate(ctx, "EXHDEL", "ss", argv[1], argv[j]);
-                    deleted++;
+                if (ex_hash_val->expire > 0) {
+                    assert(ex_hash_obj->zsl->header->level[0].forward != NULL);
+                    before_min_score = ex_hash_obj->zsl->header->level[0].forward->score;
+                    m_zslDelete(ex_hash_obj->zsl, ex_hash_val->expire, argv[j], NULL);
+                    if (ex_hash_obj->zsl->header->level[0].forward) {
+                        after_min_score = ex_hash_obj->zsl->header->level[0].forward->score;
+                        MUTEX_LOCK(ex_hash_obj->dbid);
+                        m_zslUpdateScore(zsl[ex_hash_obj->dbid], before_min_score, argv[1], after_min_score);
+                        MUTEX_UNLOCK(ex_hash_obj->dbid);
+                    } else {
+                        MUTEX_LOCK(ex_hash_obj->dbid);
+                        m_zslDelete(zsl[ex_hash_obj->dbid], before_min_score, argv[1], NULL);
+                        MUTEX_UNLOCK(ex_hash_obj->dbid);
+                    }
                 }
+                m_dictDelete(ex_hash_obj->hash, argv[j]);
+                RedisModule_Replicate(ctx, "EXHDEL", "ss", argv[1], argv[j]);
+                deleted++;
             }
         }
     }
@@ -2414,7 +2672,6 @@ int TairHashTypeActiveExpireInfo_RedisCommand(RedisModuleCtx *ctx, RedisModuleSt
         ex_hash_active_expire_dbs_per_loop, stat_last_active_expire_time_msec, stat_max_active_expire_time_msec,
         stat_avg_active_expire_time_msec, (long long)ex_hash_passive_expire_keys_per_loop);
 
-
     size_t a_len, d_len, t_size = 0;
     const char *a_buf = RedisModule_StringPtrLen(info_a, &a_len);
     char buf[1024 * 1024] = {0};
@@ -2448,8 +2705,8 @@ int TairHashTypeActiveExpireInfo_RedisCommand(RedisModuleCtx *ctx, RedisModuleSt
             MUTEX_UNLOCK(logicdb);
             continue;
         }
-        RedisModuleString *info_d = RedisModule_CreateStringPrintf(ctx, "db: %d, unexpired_fields: %ld, active_expired_fields: %ld\r\n", i,
-                                                                   zsl[logicdb]->length, (long)stat_expired_field[logicdb]);
+        RedisModuleString *info_d = RedisModule_CreateStringPrintf(ctx, "db: %d, active_expired_fields: %ld\r\n", i,
+                                                                   (long)stat_expired_field[logicdb]);
         const char *d_buf = RedisModule_StringPtrLen(info_d, &d_len);
         strncat(buf, d_buf, d_len);
         RedisModule_FreeString(ctx, info_d);
@@ -2469,6 +2726,7 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
 
     exHashObj *o = createTairHashTypeObject();
     o->hash = m_dictCreate(&tairhashDictType, NULL);
+    o->zsl = m_zslCreate();
     uint64_t len = RedisModule_LoadUnsigned(rdb);
     o->key = RedisModule_LoadString(rdb);
     o->dbid = RedisModule_LoadUnsigned(rdb);
@@ -2495,7 +2753,7 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
         m_dictAdd(o->hash, takeAndRef(skey), hashv);
         if (hashv->expire > 0) {
             if (enable_active_expire) {
-                ACTIVE_EXPIRE_INSERT(o->dbid, o->key, skey, hashv->expire);
+                ACTIVE_EXPIRE_INSERT(o, skey, hashv->expire);
             }
         }
         RedisModule_FreeString(NULL, value);
@@ -2508,7 +2766,7 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
     int i;
     for (i = 0; i < dbnum; i++) {
         phy2logic_dbmap[i] = RedisModule_LoadUnsigned(rdb);
-    } 
+    }
     return o;
 }
 
@@ -2553,7 +2811,7 @@ void TairHashTypeRdbSave(RedisModuleIO *rdb, void *value) {
         }
         m_listRelease(tmp_hash);
     }
- 
+
     /* We must save db map. */
     RedisModule_SaveUnsigned(rdb, DB_NUM);
     int i;
@@ -2634,7 +2892,7 @@ size_t TairHashTypeEffort(RedisModuleString *key, const void *value) {
     REDISMODULE_NOT_USED(key);
     exHashObj *o = (exHashObj *)value;
 
-    // TODO: include skiplist free effort
+    // TODO: include skiplist free_effort
 
     return dictSize(o->hash);
 }
@@ -2762,6 +3020,8 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         .version = REDISMODULE_TYPE_METHOD_VERSION,
         .rdb_load = TairHashTypeRdbLoad,
         .rdb_save = TairHashTypeRdbSave,
+        // .aux_load = TairHashTypeRdbAuxLoad,
+        // .aux_save = TairHashTypeRdbAuxSave,
         .aof_rewrite = TairHashTypeAofRewrite,
         .mem_usage = TairHashTypeMemUsage,
         .free = TairHashTypeFree,
@@ -2789,6 +3049,7 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
     }
 
     RedisModule_SubscribeToServerEvent(ctx, RedisModuleEvent_SwapDB, swapDbCallback);
+    RedisModule_SubscribeToKeyspaceEvents(ctx, REDISMODULE_NOTIFY_GENERIC, keySpaceNotification);
 
     return REDISMODULE_OK;
 }

@@ -3,12 +3,19 @@
      TairHash is a hash data structure developed based on the redis module. TairHash not only has the same rich data interface and high performance as the native hash, but also can set the expiration and version for the field. TairHash provides an active expiration mechanism, even if the field is not accessed after expiration, it can be actively deleted to release the memory.
 
 
-The main features：
+### The main features：
 
 - Field supports setting expire and version
-- Support active expire and passivity expire on the field
+- Support efficient active expire and passivity expire for field
 - The cmd is similar to the native hash data type
 
+### The principle of efficient expiration:
+![avatar](imgs/tairhash_index.png)
+- Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
+- The first-level sorting uses the smallest ttl in the second-level sorting index for sorting, so the main key is globally ordered
+- Every time a write operation to tairhash, the first level index will be checked first, and at most three fields will be expired, Note these fields may not belong to the key currently being operated, so in theory, the faster you write, the faster the elimination
+- Every time a write operation to tairhash, the first-level index will be checked first to find up to three expired keys, and the fields inside the key will be expire. Therefore, in theory, the faster it is written, the faster the elimination speed
+- Every time you read or write a field, it will also trigger the expiration of the field itself
 
 <br/>
 

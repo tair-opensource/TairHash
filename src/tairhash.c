@@ -520,7 +520,7 @@ static int keySpaceNotification(RedisModuleCtx *ctx, int type, const char *event
     }
 
     if (cmd_flag != CMD_NONE) {
-        static RedisModuleString *local_from_key = NULL, *local_to_key = NULL;
+        RedisModuleString *local_from_key = NULL, *local_to_key = NULL;
         int local_from_dbid, local_to_dbid;
         if (cmd_flag == CMD_RENAME) {
             local_from_key = from_key;
@@ -2812,7 +2812,9 @@ void TairHashTypeRdbSave(RedisModuleIO *rdb, void *value) {
         m_listRelease(tmp_hash);
     }
 
-    /* We must save db map. */
+    /* We must save db map. 
+     * TODO: use aux_load and aux_save to save and load db map.
+     * */
     RedisModule_SaveUnsigned(rdb, DB_NUM);
     int i;
     for (i = 0; i < DB_NUM; i++) {
@@ -3022,6 +3024,7 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
         .rdb_save = TairHashTypeRdbSave,
         // .aux_load = TairHashTypeRdbAuxLoad,
         // .aux_save = TairHashTypeRdbAuxSave,
+        // .copy = TairHashTypeCopy,
         .aof_rewrite = TairHashTypeAofRewrite,
         .mem_usage = TairHashTypeMemUsage,
         .free = TairHashTypeFree,

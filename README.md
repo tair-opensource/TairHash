@@ -8,6 +8,7 @@
 - Field supports setting expire and version
 - Support efficient active expire and passivity expire for field
 - The cmd is similar to the native hash data type
+- Support swapdb, rename, move and other redis commands that will cause the sort index to fail
 
 ### The principle of efficient expiration:
 ![avatar](imgs/tairhash_index.png)

@@ -1,6 +1,7 @@
 set testmodule [file normalize your_path/tairhash_module.so]
 
-start_server {tags {"tairzset"} overrides {bind 0.0.0.0}} {
+
+start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
     r module load $testmodule
 
     proc create_big_tairhash {key iterm} {
@@ -383,7 +384,7 @@ start_server {tags {"tairzset"} overrides {bind 0.0.0.0}} {
         assert_equal 0 [r exhlen exhashkey]
         assert_equal 0 [r exists exhashkey]
         set info [r exhexpireinfo]
-        assert { [string match "*db: 8, unexpired_fields: 0, active_expired_fields: 1*" $info] }
+        assert { [string match "*db: 8, active_expired_fields: 1*" $info] }
     }
 
     test {Async flushall/unlink} {
@@ -400,6 +401,45 @@ start_server {tags {"tairzset"} overrides {bind 0.0.0.0}} {
         r unlink k1
         r unlink k2
         r unlink k3
+    }
+
+
+    test {Rename with active expire} {
+        r flushall
+        create_big_tairhash_with_expire exk1 10 2
+        create_big_tairhash_with_expire exk2 10 2
+        create_big_tairhash_with_expire exk3 10 2
+
+        assert_equal 3 [r dbsize]
+
+        r rename exk1 exk1_1
+        r rename exk2 exk2_2
+
+        after 3000
+        assert_equal 0 [r dbsize]   
+    }
+
+    test {Move with active expire} {
+        r select 8
+        r flushall
+        create_big_tairhash_with_expire exk1 10 2
+        create_big_tairhash_with_expire exk2 10 2
+        create_big_tairhash_with_expire exk3 10 2
+
+        assert_equal 3 [r dbsize]
+
+        r move exk1 9
+        r move exk2 9
+
+        assert_equal 1 [r dbsize]
+
+        r select 9
+        assert_equal 2 [r dbsize]
+
+        after 3000
+        assert_equal 0 [r dbsize]  
+        r select 8 
+        assert_equal 0 [r dbsize]  
     }
 
     test {Active expire rdb} {
@@ -1184,7 +1224,7 @@ start_server {tags {"tairzset"} overrides {bind 0.0.0.0}} {
         assert_equal 0 [r dbsize]   
 
         set info [r exhexpireinfo]
-        assert { [string match "*db: 11, unexpired_fields: 0, active_expired_fields: 30*" $info] }
+        assert { [string match "*db: 11, active_expired_fields: 30*" $info] }
         assert { [string match "*11 -> 10*" $info] }
 
         r select 10
@@ -1199,7 +1239,7 @@ start_server {tags {"tairzset"} overrides {bind 0.0.0.0}} {
         after 3000
         assert_equal 0 [r dbsize]   
         set info [r exhexpireinfo]
-        assert { [string match "*db: 10, unexpired_fields: 0, active_expired_fields: 60*db: 12, unexpired_fields: 0, active_expired_fields: 30*" $info] }
+        assert { [string match "*db: 10, active_expired_fields: 60*db: 12, active_expired_fields: 30*" $info] }
         assert { [string match "*11 -> 10*12 -> 11*10 -> 12*" $info] }
     }
 

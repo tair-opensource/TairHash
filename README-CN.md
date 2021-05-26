@@ -8,6 +8,7 @@
 - field支持单独设置expire和version
 - 针对field支持高效的active expire和passivity expire
 - 语法和原生hash数据类型类似
+- 支持swapdb、rename和move等会导致排序索引失效的redis命令
 
 ### 高效过期实现原理：
 ![avatar](imgs/tairhash_index.png)
@@ -18,12 +19,11 @@
 - 每一次对tairhash的写操作，也会先检查第一级索引，并最多过期三个field，这些field不一定属于当前正在操作的key，因此理论上写的越快淘汰速度也就越快
 - 每一次读写field，也会触发对这个field自身的过期淘汰操作
 
-### 如何支持swapdb、rename和move
-
 
 <br/>
 
-同时，我们还开源了一个增强型的string结构，它可以给value设置版本号并支持memcached语义，具体可参见[这里](https://github.com/alibaba/TairString)
+同时，我们还开源了一个增强型的string结构，它可以给value设置版本号并支持memcached语义，具体可参见[这里](https://github.com/alibaba/TairString)。
+注意，该module只适用于redis 6.2之后的版本。
 
 <br/>
 

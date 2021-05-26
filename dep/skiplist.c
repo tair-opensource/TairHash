@@ -37,7 +37,6 @@ m_zskiplist *m_zslCreate(void) {
  * of the element is freed too, unless node->ele is set to NULL before calling
  * this function. */
 void m_zslFreeNode(m_zskiplistNode *node) {
-    // TODO:
     if (node->member) {
         RedisModule_FreeString(NULL, node->member);
     }

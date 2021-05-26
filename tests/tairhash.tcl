@@ -387,12 +387,23 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert { [string match "*db: 8, active_expired_fields: 1*" $info] }
     }
 
-    test {Async flushall/unlink} {
+    test {Async flushall/flushdb/unlink} {
         create_big_tairhash_with_expire k1 10000 100
         create_big_tairhash_with_expire k2 10000 100
         create_big_tairhash_with_expire k3 10000 100
 
         r flushall async 
+
+        assert_equal 0 [r dbsize]
+
+        r select 8
+        create_big_tairhash_with_expire k1 100000 100
+        create_big_tairhash_with_expire k2 100000 100
+        create_big_tairhash_with_expire k3 100000 100
+
+        r flushdb async
+
+        assert_equal 0 [r dbsize]
 
         create_big_tairhash_with_expire k1 100000 100
         create_big_tairhash_with_expire k2 100000 100
@@ -401,8 +412,9 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         r unlink k1
         r unlink k2
         r unlink k3
-    }
 
+        assert_equal 0 [r dbsize]
+    }
 
     test {Rename with active expire} {
         r flushall

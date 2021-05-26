@@ -10,12 +10,14 @@
 - The cmd is similar to the native hash data type
 - Support swapdb, rename, move and other redis commands that will cause the sort index to fail
 
+### Note this module can only be used for versions after redis 6.2
+
 ### The principle of efficient expiration:
 ![avatar](imgs/tairhash_index.png)
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
-- The first-level sorting uses the smallest ttl in the second-level sorting index for sorting, so the main key is globally ordered
+- The first-level uses the smallest ttl in the second-level sorting index for sorting, so the main key is globally ordered
+- The built-in timer will periodically scan the first-level index to find out a key that has expired, and then check the secondary index of these keys to eliminate the expired fields. This is the active expire
 - Every time a write operation to tairhash, the first level index will be checked first, and at most three fields will be expired, Note these fields may not belong to the key currently being operated, so in theory, the faster you write, the faster the elimination
-- Every time a write operation to tairhash, the first-level index will be checked first to find up to three expired keys, and the fields inside the key will be expire. Therefore, in theory, the faster it is written, the faster the elimination speed
 - Every time you read or write a field, it will also trigger the expiration of the field itself
 
 <br/>
@@ -23,7 +25,6 @@
 At the same time, we also open sourced an enhanced string structure, which can set the version number for value and support memcached semantics. For details, please refer to [here](https://github.com/alibaba/TairString)
 
 <br/>
-
 
 ## Quick Start
 

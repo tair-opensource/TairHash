@@ -10,6 +10,9 @@
 - 语法和原生hash数据类型类似
 - 支持swapdb、rename和move等会导致排序索引失效的redis命令
 
+
+### 注意，该module只适用于redis 6.2之后的版本
+
 ### 高效过期实现原理：
 ![avatar](imgs/tairhash_index.png)
 
@@ -23,7 +26,7 @@
 <br/>
 
 同时，我们还开源了一个增强型的string结构，它可以给value设置版本号并支持memcached语义，具体可参见[这里](https://github.com/alibaba/TairString)。
-注意，该module只适用于redis 6.2之后的版本。
+
 
 <br/>
 

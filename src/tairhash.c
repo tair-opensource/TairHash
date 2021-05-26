@@ -2861,10 +2861,9 @@ void TairHashTypeFree(void *value) {
 
 void TairHashTypeUnlink(RedisModuleString *key, const void *value) {
     REDISMODULE_NOT_USED(key);
-    REDISMODULE_NOT_USED(value);
 
     struct exHashObj *o = (struct exHashObj *)value;
-    if (o->zsl->length > 0) {
+    if (o->zsl->length) {
         /* UNLINK is a synchronous call, so ExpireNode can be safely deleted here. */
         m_zslDelete(zsl[o->dbid], o->zsl->header->level[0].forward->score, o->key, NULL);
     }

@@ -19,370 +19,370 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
     }
 
     test {Exhset/exhget basic} {
-        r del exhashkey
+        r del tairhashkey
 
-        catch {r exhset exhashkey field val xxxx} err
+        catch {r exhset tairhashkey field val xxxx} err
         assert_match {*ERR*syntax*error*} $err
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        catch {r exhset exhashkey field} err
+        catch {r exhset tairhashkey field} err
         assert_match {*ERR*wrong*number*of*arguments*} $err
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        set new_field [r exhset exhashkey field val]
+        set new_field [r exhset tairhashkey field val]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val $ret_val
     }
 
     test {Exhset/exhget NX/XX} {
-        r del exhashkey
+        r del tairhashkey
 
-        catch {r exhset exhashkey field val XX NX} err
+        catch {r exhset tairhashkey field val XX NX} err
         assert_match {*ERR*syntax*error*} $err
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        set new_field [r exhset exhashkey field val]
+        set new_field [r exhset tairhashkey field val]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val $ret_val
 
-        set ret_val [r exhset exhashkey field val1 Nx]
+        set ret_val [r exhset tairhashkey field val1 Nx]
         assert_equal -1 $ret_val
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val $ret_val
 
-        set ret_val [r exhset exhashkey field_nx val Nx]
+        set ret_val [r exhset tairhashkey field_nx val Nx]
         assert_equal 1 $ret_val
 
-        set ret_val [r exhget exhashkey field_nx]
+        set ret_val [r exhget tairhashkey field_nx]
         assert_equal val $ret_val
 
-        r del exhashkey
+        r del tairhashkey
 
-        set ret_val [r exhset exhashkey field_nx val Xx]
+        set ret_val [r exhset tairhashkey field_nx val Xx]
         assert_equal -1 $ret_val
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        set ret_val [r exhset exhashkey field_nx val1]
+        set ret_val [r exhset tairhashkey field_nx val1]
         assert_equal 1 $ret_val
 
-        set ret_val [r exhget exhashkey field_nx]
+        set ret_val [r exhget tairhashkey field_nx]
         assert_equal val1 $ret_val
 
-        set ret_val [r exhset exhashkey field_nx val2 XX]
+        set ret_val [r exhset tairhashkey field_nx val2 XX]
         assert_equal 0 $ret_val
 
-        set ret_val [r exhget exhashkey field_nx]
+        set ret_val [r exhget tairhashkey field_nx]
         assert_equal val2 $ret_val
     }
 
     test {Exhset/exhget EX/EXAT/PX/PXAT with active expire } {
-        r del exhashkey
+        r del tairhashkey
 
-        catch {r exhset exhashkey field val EX noint} err
+        catch {r exhset tairhashkey field val EX noint} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhset exhashkey field val EX -1} err
+        catch {r exhset tairhashkey field val EX -1} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhset exhashkey field val PX noint} err
+        catch {r exhset tairhashkey field val PX noint} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhset exhashkey field val EXAT noint} err
+        catch {r exhset tairhashkey field val EXAT noint} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhset exhashkey field val PXAT noint} err
+        catch {r exhset tairhashkey field val PXAT noint} err
         assert_match {*ERR*syntax*error*} $err
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        catch {r exhset exhashkey field val EX 3 EXAT 10} err
+        catch {r exhset tairhashkey field val EX 3 EXAT 10} err
         assert_match {*ERR*syntax*error*} $err
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        set new_field [r exhset exhashkey field val EX 1]
+        set new_field [r exhset tairhashkey field val EX 1]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val $ret_val
 
-        set new_field [r exhset exhashkey field val2 EX 2]
+        set new_field [r exhset tairhashkey field val2 EX 2]
         assert_equal 0 $new_field
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val2 $ret_val
 
         after 3000
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal "" $ret_val
 
-        set new_field [r exhset exhashkey field val PX 1000]
+        set new_field [r exhset tairhashkey field val PX 1000]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val $ret_val
 
-        set new_field [r exhset exhashkey field val2 PX 2000]
+        set new_field [r exhset tairhashkey field val2 PX 2000]
         assert_equal 0 $new_field
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val2 $ret_val
 
         after 1000
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 1 $ret_val
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val2 $ret_val
 
         after 2000
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal "" $ret_val
     }
 
     test {Exhset/exhget EX/EXAT/PX/PXAT with same time } {
-        r del exhashkey
+        r del tairhashkey
 
         set abtime [expr [clock seconds] + 3]
-        assert_equal 1 [r exhset exhashkey field1 val EXAT $abtime]
-        assert_equal 1 [r exhdel exhashkey field1 ]
-        assert_equal 1 [r exhset exhashkey field1 val EXAT $abtime]
-        assert_equal 1 [r exhset exhashkey field2 val EXAT $abtime]
-        assert_equal 1 [r exhdel exhashkey field2 ]
-        assert_equal 1 [r exhset exhashkey field2 val EXAT $abtime]
-        assert_equal 1 [r exhset exhashkey field3 val EXAT $abtime]
-        assert_equal 1 [r exhdel exhashkey field3 ]
-        assert_equal 1 [r exhset exhashkey field3 val EXAT $abtime]
-        assert_equal 3 [r exhlen exhashkey]
+        assert_equal 1 [r exhset tairhashkey field1 val EXAT $abtime]
+        assert_equal 1 [r exhdel tairhashkey field1 ]
+        assert_equal 1 [r exhset tairhashkey field1 val EXAT $abtime]
+        assert_equal 1 [r exhset tairhashkey field2 val EXAT $abtime]
+        assert_equal 1 [r exhdel tairhashkey field2 ]
+        assert_equal 1 [r exhset tairhashkey field2 val EXAT $abtime]
+        assert_equal 1 [r exhset tairhashkey field3 val EXAT $abtime]
+        assert_equal 1 [r exhdel tairhashkey field3 ]
+        assert_equal 1 [r exhset tairhashkey field3 val EXAT $abtime]
+        assert_equal 3 [r exhlen tairhashkey]
         after 4000
-        assert_equal 0 [r exhlen exhashkey]
+        assert_equal 0 [r exhlen tairhashkey]
     }
 
     test {Exhset/exhget VER/ABS } {
-        r del exhashkey
+        r del tairhashkey
 
-        catch {r exhset exhashkey field val VER 3 ABS 10} err
+        catch {r exhset tairhashkey field val VER 3 ABS 10} err
         assert_match {*ERR*syntax*error*} $err
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        set new_field [r exhset exhashkey field val ver 99999]
+        set new_field [r exhset tairhashkey field val ver 99999]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val $ret_val
 
-        catch {r exhset exhashkey field val2 ver 99999} err
+        catch {r exhset tairhashkey field val2 ver 99999} err
         assert_match {*ERR*update*version*is*stale*} $err
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val $ret_val
 
-        set new_field [r exhset exhashkey field val2 ver 1]
+        set new_field [r exhset tairhashkey field val2 ver 1]
         assert_equal 0 $new_field
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val2 $ret_val
 
-        set new_field [r exhset exhashkey field val2 ver 2]
+        set new_field [r exhset tairhashkey field val2 ver 2]
         assert_equal 0 $new_field
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val2 $ret_val
 
-        set new_field [r exhset exhashkey field val3 ABS 1]
+        set new_field [r exhset tairhashkey field val3 ABS 1]
         assert_equal 0 $new_field
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val3 $ret_val
 
-        set new_field [r exhset exhashkey field val4 ver 1]
+        set new_field [r exhset tairhashkey field val4 ver 1]
         assert_equal 0 $new_field
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val4 $ret_val
 
-        r del exhashkey
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field val ABS 9999]
+        set new_field [r exhset tairhashkey field val ABS 9999]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val $ret_val
 
-        catch {r exhset exhashkey field val2 ver 1} err
+        catch {r exhset tairhashkey field val2 ver 1} err
         assert_match {*ERR*update*version*is*stale*} $err
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val $ret_val
 
-        set new_field [r exhset exhashkey field val2 ver 9999]
+        set new_field [r exhset tairhashkey field val2 ver 9999]
         assert_equal 0 $new_field
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val2 $ret_val
     }
 
     test {Active expire basic} {
-        r del exhashkey
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field1 val EX 1]
+        set new_field [r exhset tairhashkey field1 val EX 1]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
-        set new_field [r exhset exhashkey field2 val EX 3]
+        set new_field [r exhset tairhashkey field2 val EX 3]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field2]
+        set ret_val [r exhget tairhashkey field2]
         assert_equal val $ret_val
 
         after 1000
 
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert {$h_len <= 2 && $h_len >=1 }
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal "" $ret_val
 
         after 3000
 
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 0 $h_len
 
-        set ret_val [r exhget exhashkey field3]
+        set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
     }
 
     test {Active expire in multi db} {
         r select 0
-        r del exhashkey
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field1 val EX 1]
+        set new_field [r exhset tairhashkey field1 val EX 1]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
-        set new_field [r exhset exhashkey field2 val EX 3]
+        set new_field [r exhset tairhashkey field2 val EX 3]
         assert_equal 1 $new_field
 
         r select 9
-        r del exhashkey
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field1 val EX 1]
+        set new_field [r exhset tairhashkey field1 val EX 1]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
-        set new_field [r exhset exhashkey field2 val EX 3]
+        set new_field [r exhset tairhashkey field2 val EX 3]
         assert_equal 1 $new_field
 
         r select 15
-        r del exhashkey
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field1 val EX 1]
+        set new_field [r exhset tairhashkey field1 val EX 1]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
-        set new_field [r exhset exhashkey field2 val EX 3]
+        set new_field [r exhset tairhashkey field2 val EX 3]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field2]
+        set ret_val [r exhget tairhashkey field2]
         assert_equal val $ret_val
 
         after 2000
         r select 0
 
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert {$h_len <= 2 && $h_len >=1 }
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal "" $ret_val
 
         r select 9
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert {$h_len <= 2 && $h_len >=1 }
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal "" $ret_val
 
         r select 15
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert {$h_len <= 2 && $h_len >=1 }
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal "" $ret_val
 
         after 3000
 
         r select 0
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 0 $h_len
 
-        set ret_val [r exhget exhashkey field3]
+        set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
 
         r select 9
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 0 $h_len
 
-        set ret_val [r exhget exhashkey field3]
+        set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
 
         r select 15
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 0 $h_len
 
-        set ret_val [r exhget exhashkey field3]
+        set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
     }
 
     test {Active expire with repeat feilds} {
         r select 8
-        r del exhashkey
-        r exhset exhashkey f v ex 1
-        r exhset exhashkey f v ex 1
-        r exhset exhashkey f v ex 1
+        r del tairhashkey
+        r exhset tairhashkey f v ex 1
+        r exhset tairhashkey f v ex 1
+        r exhset tairhashkey f v ex 1
 
-        assert_equal 1 [r exhlen exhashkey]
+        assert_equal 1 [r exhlen tairhashkey]
 
         after 2000
 
-        assert_equal 0 [r exhlen exhashkey]
-        assert_equal 0 [r exists exhashkey]
+        assert_equal 0 [r exhlen tairhashkey]
+        assert_equal 0 [r exists tairhashkey]
         set info [r exhexpireinfo]
         assert { [string match "*db: 8, active_expired_fields: 1*" $info] }
     }
@@ -455,33 +455,33 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
     }
 
     test {Active expire rdb} {
-        r del exhashkey
+        r del tairhashkey
 
         r select 0
-        r del exhashkey
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field1 val EX 3]
+        set new_field [r exhset tairhashkey field1 val EX 3]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
         r select 9
-        r del exhashkey
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field1 val EX 3]
+        set new_field [r exhset tairhashkey field1 val EX 3]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
         r select 15
-        r del exhashkey
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field1 val EX 3]
+        set new_field [r exhset tairhashkey field1 val EX 3]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
         
         r bgsave
@@ -489,83 +489,94 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         r debug reload
 
         r select 0
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
         r select 9
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
         r select 15
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
         after 4000
         r select 0
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 0 $h_len
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal "" $ret_val
 
         r select 9
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 0 $h_len
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal "" $ret_val
 
         r select 15
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 0 $h_len
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal "" $ret_val
     }
 
     test {Swapdb in rdb save and load} {
+        r select 7
+        r del tairhashkey
+        create_big_tairhash_with_expire tairhashkey 10 2
+        
         r swapdb 7 13
         r swapdb 13 14 
 
-        set info [r exhexpireinfo]
-        assert { [string match "*13 -> 7*14 -> 13*7 -> 14*" $info] }
+        r select 14
+        assert_equal 1 [r dbsize]
+
+        r select 7
+        assert_equal 0 [r dbsize]
 
         r bgsave
         waitForBgsave r
         r debug reload
 
-        set info [r exhexpireinfo]
-        assert { [string match "*13 -> 7*14 -> 13*7 -> 14*" $info] }
+        r select 14
+        assert_equal 1 [r dbsize]
+
+        after 3000
+
+        assert_equal 0 [r dbsize]
     }
 
     test {Active expire aof} {
         r config set aof-use-rdb-preamble no
 
         r select 0
-        r del exhashkey
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field1 val EX 3]
+        set new_field [r exhset tairhashkey field1 val EX 3]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
         r select 9
-        r del exhashkey
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field1 val EX 3]
+        set new_field [r exhset tairhashkey field1 val EX 3]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
         r select 15
-        r del exhashkey
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field1 val EX 3]
+        set new_field [r exhset tairhashkey field1 val EX 3]
         assert_equal 1 $new_field
 
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
         r bgrewriteaof
@@ -573,320 +584,320 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         r debug loadaof
 
         r select 0
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
         r select 9
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
         r select 15
-        set ret_val [r exhget exhashkey field1]
+        set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
         after 4000
 
         r select 0
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 0 $h_len
 
-        set ret_val [r exhget exhashkey field3]
+        set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
 
         r select 9
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 0 $h_len
 
-        set ret_val [r exhget exhashkey field3]
+        set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
 
         r select 15
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 0 $h_len
 
-        set ret_val [r exhget exhashkey field3]
+        set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
 
     }
 
     test {Exhlen} {
-        r del exhashkey
+        r del tairhashkey
 
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 0 $h_len
 
-        set new_field [r exhset exhashkey field1 val]
+        set new_field [r exhset tairhashkey field1 val]
         assert_equal 1 $new_field
 
-        set new_field [r exhset exhashkey field1 val2]
+        set new_field [r exhset tairhashkey field1 val2]
         assert_equal 0 $new_field
 
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 1 $h_len
 
-        set new_field [r exhset exhashkey field2 val]
+        set new_field [r exhset tairhashkey field2 val]
         assert_equal 1 $new_field
 
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 2 $h_len
 
-        set new_field [r exhset exhashkey field3 val PX 100]
+        set new_field [r exhset tairhashkey field3 val PX 100]
         assert_equal 1 $new_field
 
         after 100
 
-        set h_len [r exhlen exhashkey]
+        set h_len [r exhlen tairhashkey]
         assert_equal 3 $h_len
     }
 
     test {Exhdelwithver} {
-        r del exhashkey
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field1 val]
+        set new_field [r exhset tairhashkey field1 val]
         assert_equal 1 $new_field
 
-        set new_field [r exhset exhashkey field2 val]
+        set new_field [r exhset tairhashkey field2 val]
         assert_equal 1 $new_field
 
-        set new_field [r exhset exhashkey field3 val]
+        set new_field [r exhset tairhashkey field3 val]
         assert_equal 1 $new_field
-        set del_num [r exhdelwithver exhashkey field1 0 field2 1 field3 2]
+        set del_num [r exhdelwithver tairhashkey field1 0 field2 1 field3 2]
         assert_equal 2 $del_num
 
-        assert_equal 1 [r exhexists exhashkey field3]
+        assert_equal 1 [r exhexists tairhashkey field3]
     }
 
     test {Exhexists} {
-        r del exhashkey
+        r del tairhashkey
 
-        set exist_num [r exhexists exhashkey field]
+        set exist_num [r exhexists tairhashkey field]
         assert_equal 0 $exist_num
 
-        set new_field [r exhset exhashkey field1 val]
+        set new_field [r exhset tairhashkey field1 val]
         assert_equal 1 $new_field
 
-        set exist_num [r exhexists exhashkey field1]
+        set exist_num [r exhexists tairhashkey field1]
         assert_equal 1 $exist_num
 
-        set new_field [r exhset exhashkey field2 val PX 100]
+        set new_field [r exhset tairhashkey field2 val PX 100]
         assert_equal 1 $new_field
 
         after 200
 
-        set exist_num [r exhexists exhashkey field2]
+        set exist_num [r exhexists tairhashkey field2]
         assert_equal 0 $exist_num
     }
 
     test {Exhstrlen} {
-        r del exhashkey
+        r del tairhashkey
 
-        set str_len [r exhstrlen exhashkey field2]
+        set str_len [r exhstrlen tairhashkey field2]
         assert_equal 0 $str_len
 
-        set new_field [r exhset exhashkey field val]
+        set new_field [r exhset tairhashkey field val]
         assert_equal 1 $new_field
 
-        set str_len [r exhstrlen exhashkey field]
+        set str_len [r exhstrlen tairhashkey field]
         assert_equal 3 $str_len
 
-        set str_len [r exhstrlen exhashkey field2]
+        set str_len [r exhstrlen tairhashkey field2]
         assert_equal 0 $str_len
     }
 
     test {Exhincrby} {
-        r del exhashkey
+        r del tairhashkey
 
-        catch {r exhincrby exhashkey field} err
+        catch {r exhincrby tairhashkey field} err
         assert_match {*ERR*wrong*number*of*arguments*} $err
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        catch {r exhincrby exhashkey field 3 XX} err
+        catch {r exhincrby tairhashkey field 3 XX} err
         assert_match {*ERR*syntax*error*} $err
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        catch {r exhincrby exhashkey field val} err
+        catch {r exhincrby tairhashkey field val} err
         assert_match {*ERR*value*is*not*an*integer*} $err
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
         set incr_val 9
-        set new_cnt [r exhincrby exhashkey field $incr_val]
+        set new_cnt [r exhincrby tairhashkey field $incr_val]
         assert_equal $incr_val $new_cnt
 
-        set new_field [r exhset exhashkey field2 val]
+        set new_field [r exhset tairhashkey field2 val]
         assert_equal 1 $new_field
 
-        catch {r exhincrby exhashkey field2 $incr_val} err
+        catch {r exhincrby tairhashkey field2 $incr_val} err
         assert_match {*ERR*value*is*not*an*integer*} $err
     }
 
     test {Exhincrby with boundary} {
-        r del exhashkey
+        r del tairhashkey
 
-        catch {r exhincrby exhashkey f1 1 max } e
+        catch {r exhincrby tairhashkey f1 1 max } e
         assert_match {*ERR*syntax*error*} $e
 
-        catch {r exhincrby exhashkey f1 1 max xxx} e
+        catch {r exhincrby tairhashkey f1 1 max xxx} e
         assert_match {ERR*not an integer*} $e
 
-        catch {r exhincrby exhashkey f2 1 min xxx} e
+        catch {r exhincrby tairhashkey f2 1 min xxx} e
         assert_match {ERR*not an integer*} $e
 
-        assert_equal 0 [r exhexists exhashkey f1]
-        assert_equal 0 [r exhexists exhashkey f2]
+        assert_equal 0 [r exhexists tairhashkey f1]
+        assert_equal 0 [r exhexists tairhashkey f2]
 
-        catch {r exhincrby exhashkey f1 1 min 10 max 1} e
+        catch {r exhincrby tairhashkey f1 1 min 10 max 1} e
         assert_match {ERR*min value is bigger than max*} $e
         assert_equal 0 [r exhexists hash f1]
 
-        catch {r exhincrby exhashkey f1 11 min 1 max 10} e
+        catch {r exhincrby tairhashkey f1 11 min 1 max 10} e
         assert_match {ERR*increment or decrement would overflow*} $e
         assert_equal 0 [r exhexists hash f1]
 
-        assert_equal 3 [r exhincrby exhashkey f1 3 min 1 max 10]
-        assert_equal -5 [r exhincrby exhashkey f1 -8 min -5 max 10]
+        assert_equal 3 [r exhincrby tairhashkey f1 3 min 1 max 10]
+        assert_equal -5 [r exhincrby tairhashkey f1 -8 min -5 max 10]
     }
 
     test {Exhincrbyfloat} {
-        r del exhashkey
+        r del tairhashkey
 
-        catch {r exhincrbyfloat exhashkey field val} err
+        catch {r exhincrbyfloat tairhashkey field val} err
         assert_match {*ERR*value*is*not*an*float*} $err
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        catch {r exhincrbyfloat exhashkey field 3.0 XX} err
+        catch {r exhincrbyfloat tairhashkey field 3.0 XX} err
         assert_match {*ERR*syntax*error*} $err
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
         set float_incr_val 0.9
-        set new_cnt [r exhincrbyfloat exhashkey field $float_incr_val]
+        set new_cnt [r exhincrbyfloat tairhashkey field $float_incr_val]
         assert_equal $float_incr_val $new_cnt
 
-        set new_field [r exhset exhashkey field2 val]
+        set new_field [r exhset tairhashkey field2 val]
         assert_equal 1 $new_field
 
-        catch {r exhincrbyfloat exhashkey field2 $float_incr_val} err
+        catch {r exhincrbyfloat tairhashkey field2 $float_incr_val} err
         assert_match {*ERR*value*is*not*an*float*} $err
     }
 
     test {Exhincrbyfloat with boundary} {
-        r del exhashkey
+        r del tairhashkey
 
-        catch {r exhincrbyfloat exhashkey f1 1.1 max } e
+        catch {r exhincrbyfloat tairhashkey f1 1.1 max } e
         assert_match {*ERR*syntax*error*} $e
 
-        catch {r exhincrbyfloat exhashkey f1 1.1 max xxx} e
+        catch {r exhincrbyfloat tairhashkey f1 1.1 max xxx} e
         assert_match {ERR*not a float*} $e
 
-        catch {r exhincrbyfloat exhashkey f2 1.1 min xxx} e
+        catch {r exhincrbyfloat tairhashkey f2 1.1 min xxx} e
         assert_match {ERR*not a float*} $e
 
-        assert_equal 0 [r exhexists exhashkey f1]
-        assert_equal 0 [r exhexists exhashkey f2]
+        assert_equal 0 [r exhexists tairhashkey f1]
+        assert_equal 0 [r exhexists tairhashkey f2]
 
-        catch {r exhincrbyfloat exhashkey f1 1.1 min 10.1 max 1.1} e
+        catch {r exhincrbyfloat tairhashkey f1 1.1 min 10.1 max 1.1} e
         assert_match {ERR*min value is bigger than max*} $e
         assert_equal 0 [r exhexists hash f1]
 
-        catch {r exhincrbyfloat exhashkey f1 11.1 min 1.1 max 10.1} e
+        catch {r exhincrbyfloat tairhashkey f1 11.1 min 1.1 max 10.1} e
         assert_match {ERR*increment or decrement would overflow*} $e
         assert_equal 0 [r exhexists hash f1]
 
-        assert_equal 3.1 [r exhincrbyfloat exhashkey f1 3.1 min 1.1 max 10.1]
-        assert_equal -4.9 [r exhincrbyfloat exhashkey f1 -8.0 min -5.1 max 10.1]
+        assert_equal 3.1 [r exhincrbyfloat tairhashkey f1 3.1 min 1.1 max 10.1]
+        assert_equal -4.9 [r exhincrbyfloat tairhashkey f1 -8.0 min -5.1 max 10.1]
     }
 
     test {Exhincrby with params} {
-        r del exhashkey
+        r del tairhashkey
 
-        catch {r exhincrby exhashkey field 2 VER -1} err
+        catch {r exhincrby tairhashkey field 2 VER -1} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhincrby exhashkey field 2 ABS 0} err
+        catch {r exhincrby tairhashkey field 2 ABS 0} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhincrby exhashkey field 2 EX -2} err
+        catch {r exhincrby tairhashkey field 2 EX -2} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhincrby exhashkey field 2 EX 2 EXAT 2} err
+        catch {r exhincrby tairhashkey field 2 EX 2 EXAT 2} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhincrby exhashkey field 2 PX 2 PXAT 2} err
+        catch {r exhincrby tairhashkey field 2 PX 2 PXAT 2} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhincrby exhashkey field 2 EX 2 PX 2} err
+        catch {r exhincrby tairhashkey field 2 EX 2 PX 2} err
         assert_match {*ERR*syntax*error*} $err
 
-        assert_equal 1 [r exhincrby exhashkey field 1]
-        assert_equal 1 [r exhver exhashkey field ]
-        catch {r exhincrby exhashkey field 1 VER 2} err
+        assert_equal 1 [r exhincrby tairhashkey field 1]
+        assert_equal 1 [r exhver tairhashkey field ]
+        catch {r exhincrby tairhashkey field 1 VER 2} err
         assert_match {*ERR*update*version*is*stale*} $err
-        assert_equal 1 [r exhget exhashkey field ]
-        assert_equal 2 [r exhincrby exhashkey field 1 VER 0]
-        assert_equal 2 [r exhver exhashkey field ]
-        assert_equal 3 [r exhincrby exhashkey field 1 VER 2]
-        assert_equal 4 [r exhincrby exhashkey field 1 ABS 10]
-        assert_equal 10 [r exhver exhashkey field ]
-        assert_equal 5 [r exhincrby exhashkey field 1 VER 10 EX 1]
-        assert_equal 11 [r exhver exhashkey field ]
+        assert_equal 1 [r exhget tairhashkey field ]
+        assert_equal 2 [r exhincrby tairhashkey field 1 VER 0]
+        assert_equal 2 [r exhver tairhashkey field ]
+        assert_equal 3 [r exhincrby tairhashkey field 1 VER 2]
+        assert_equal 4 [r exhincrby tairhashkey field 1 ABS 10]
+        assert_equal 10 [r exhver tairhashkey field ]
+        assert_equal 5 [r exhincrby tairhashkey field 1 VER 10 EX 1]
+        assert_equal 11 [r exhver tairhashkey field ]
         after 2000
-        assert_equal 0 [r exhexists exhashkey field]
+        assert_equal 0 [r exhexists tairhashkey field]
 
-        assert_equal 1 [r exhincrby exhashkey field 1 EX 2]
-        assert_equal 1 [r exhlen exhashkey]
+        assert_equal 1 [r exhincrby tairhashkey field 1 EX 2]
+        assert_equal 1 [r exhlen tairhashkey]
         after 4000
-        assert_equal 0 [r exhlen exhashkey]
+        assert_equal 0 [r exhlen tairhashkey]
     }
 
     test {Exhincrbyfloat with params} {
-        r del exhashkey
+        r del tairhashkey
 
-        catch {r exhincrbyfloat exhashkey field 2 VER -1} err
+        catch {r exhincrbyfloat tairhashkey field 2 VER -1} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhincrbyfloat exhashkey field 2 ABS 0} err
+        catch {r exhincrbyfloat tairhashkey field 2 ABS 0} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhincrbyfloat exhashkey field 2 EX -2} err
+        catch {r exhincrbyfloat tairhashkey field 2 EX -2} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhincrbyfloat exhashkey field 2 EX 2 EXAT 2} err
+        catch {r exhincrbyfloat tairhashkey field 2 EX 2 EXAT 2} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhincrbyfloat exhashkey field 2 PX 2 PXAT 2} err
+        catch {r exhincrbyfloat tairhashkey field 2 PX 2 PXAT 2} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhincrbyfloat exhashkey field 2 EX 2 PX 2} err
+        catch {r exhincrbyfloat tairhashkey field 2 EX 2 PX 2} err
         assert_match {*ERR*syntax*error*} $err
 
-        assert_equal 1 [r exhincrbyfloat exhashkey field 1]
-        assert_equal 1 [r exhver exhashkey field ]
-        catch {r exhincrbyfloat exhashkey field 1 VER 2} err
+        assert_equal 1 [r exhincrbyfloat tairhashkey field 1]
+        assert_equal 1 [r exhver tairhashkey field ]
+        catch {r exhincrbyfloat tairhashkey field 1 VER 2} err
         assert_match {*ERR*update*version*is*stale*} $err
-        assert_equal 1 [r exhget exhashkey field ]
-        assert_equal 2 [r exhincrbyfloat exhashkey field 1 VER 0]
-        assert_equal 2 [r exhver exhashkey field ]
-        assert_equal 3 [r exhincrbyfloat exhashkey field 1 VER 2]
-        assert_equal 4 [r exhincrbyfloat exhashkey field 1 ABS 10]
-        assert_equal 10 [r exhver exhashkey field ]
-        assert_equal 5 [r exhincrbyfloat exhashkey field 1 VER 10 EX 1]
-        assert_equal 11 [r exhver exhashkey field ]
+        assert_equal 1 [r exhget tairhashkey field ]
+        assert_equal 2 [r exhincrbyfloat tairhashkey field 1 VER 0]
+        assert_equal 2 [r exhver tairhashkey field ]
+        assert_equal 3 [r exhincrbyfloat tairhashkey field 1 VER 2]
+        assert_equal 4 [r exhincrbyfloat tairhashkey field 1 ABS 10]
+        assert_equal 10 [r exhver tairhashkey field ]
+        assert_equal 5 [r exhincrbyfloat tairhashkey field 1 VER 10 EX 1]
+        assert_equal 11 [r exhver tairhashkey field ]
         after 2000
-        assert_equal 0 [r exhexists exhashkey field]
+        assert_equal 0 [r exhexists tairhashkey field]
 
-        assert_equal 1 [r exhincrbyfloat exhashkey field 1 EX 2]
-        assert_equal 1 [r exhlen exhashkey]
+        assert_equal 1 [r exhincrbyfloat tairhashkey field 1 EX 2]
+        assert_equal 1 [r exhlen tairhashkey]
         after 4000
-        assert_equal 0 [r exhlen exhashkey]
+        assert_equal 0 [r exhlen tairhashkey]
     }
 
     test {EXHINCRBY against non existing database key} {
@@ -1023,201 +1034,201 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
     } {1 1}
 
     test {Exhkeys / exhvals / exhgetall basic} {
-        r del exhashkey
+        r del tairhashkey
 
-        array set exhashkeyh {}
+        array set tairhashkeyh {}
         for {set i 0} {$i < 8} {incr i} {
             set key __avoid_collisions__[randstring 0 8 alpha]
             set val __avoid_collisions__[randstring 0 8 alpha]
-            if {[info exists exhashkey($key)]} {
+            if {[info exists tairhashkey($key)]} {
                 incr i -1
                 continue
             }
-            r exhset exhashkey $key $val
-            set exhashkey($key) $val
+            r exhset tairhashkey $key $val
+            set tairhashkey($key) $val
         }
 
-        assert_equal [lsort [r exhkeys exhashkey]] [lsort [array names exhashkey *]]
+        assert_equal [lsort [r exhkeys tairhashkey]] [lsort [array names tairhashkey *]]
 
         set expected_vals {}
-        foreach {k v} [array get exhashkey] {
+        foreach {k v} [array get tairhashkey] {
             lappend expected_vals $v
         }
-        assert_equal [lsort [r exhvals exhashkey]] [lsort $expected_vals]
-        assert_equal [lsort [r exhgetall exhashkey]] [lsort [array get exhashkey]]
-        assert_equal [] [r exhgetall exhashkey_noexists]
+        assert_equal [lsort [r exhvals tairhashkey]] [lsort $expected_vals]
+        assert_equal [lsort [r exhgetall tairhashkey]] [lsort [array get tairhashkey]]
+        assert_equal [] [r exhgetall tairhashkey_noexists]
     }
 
     test {Exhkeys / exhvals / exhgetall while expired fields exist} {
-        r del exhashkey
-        assert_equal 1 [r exhset exhashkey field1 val1 PX 100]
-        assert_equal 1 [r exhset exhashkey field2 val2 PX 200]
-        assert_equal 1 [r exhset exhashkey field3 val3]
+        r del tairhashkey
+        assert_equal 1 [r exhset tairhashkey field1 val1 PX 100]
+        assert_equal 1 [r exhset tairhashkey field2 val2 PX 200]
+        assert_equal 1 [r exhset tairhashkey field3 val3]
 
-        assert_equal [lsort [r exhvals exhashkey]] [lsort {val1 val2 val3}]
-        assert_equal [lsort [r exhkeys exhashkey]] [lsort {field1 field2 field3}]
-        assert_equal [lsort [r exhgetall exhashkey]] [lsort {field1 val1 field2 val2 field3 val3}]
+        assert_equal [lsort [r exhvals tairhashkey]] [lsort {val1 val2 val3}]
+        assert_equal [lsort [r exhkeys tairhashkey]] [lsort {field1 field2 field3}]
+        assert_equal [lsort [r exhgetall tairhashkey]] [lsort {field1 val1 field2 val2 field3 val3}]
 
         after 300
 
-        assert_equal [lsort [r exhvals exhashkey]] [lsort {val3}]
-        assert_equal [lsort [r exhkeys exhashkey]] [lsort {field3}]
-        assert_equal [lsort [r exhgetall exhashkey]] [lsort {field3 val3}]
+        assert_equal [lsort [r exhvals tairhashkey]] [lsort {val3}]
+        assert_equal [lsort [r exhkeys tairhashkey]] [lsort {field3}]
+        assert_equal [lsort [r exhgetall tairhashkey]] [lsort {field3 val3}]
     }
 
     test {Exhmget} {
-        r del exhashkey
-        assert_equal 1 [r exhset exhashkey field1 val1]
-        assert_equal 1 [r exhset exhashkey field2 val2]
-        set result [r exhmget exhashkey field1 field2 field-not-exist]
+        r del tairhashkey
+        assert_equal 1 [r exhset tairhashkey field1 val1]
+        assert_equal 1 [r exhset tairhashkey field2 val2]
+        set result [r exhmget tairhashkey field1 field2 field-not-exist]
         assert_equal $result {val1 val2 {}}
     }
 
     test {Exhmget with expire} {
-        r del exhashkey
+        r del tairhashkey
         r flushall
-        assert_equal 1 [r exhset exhashkey field1 val1 PX 100]
-        assert_equal 1 [r exhset exhashkey field2 val2 PX 100]
-        assert_equal 1 [r exhset exhashkey field3 val3 PX 100]
-        set result [r exhmget exhashkey field1 field2 field3]
+        assert_equal 1 [r exhset tairhashkey field1 val1 PX 100]
+        assert_equal 1 [r exhset tairhashkey field2 val2 PX 100]
+        assert_equal 1 [r exhset tairhashkey field3 val3 PX 100]
+        set result [r exhmget tairhashkey field1 field2 field3]
         assert_equal $result {val1 val2 val3}
 
         after 200
-        set result [r exhmget exhashkey field1 field2 field3]
+        set result [r exhmget tairhashkey field1 field2 field3]
         assert_equal $result {{} {} {}}
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
     }
 
     test {Exhsetnx} {
-        r del exhashkey
+        r del tairhashkey
 
-        assert_equal 1 [r exhsetnx exhashkey field1 val1]
-        assert_equal 1 [r exhsetnx exhashkey field2 val2]
-        assert_equal 0 [r exhsetnx exhashkey field2 val2] "err while hsetnx"
+        assert_equal 1 [r exhsetnx tairhashkey field1 val1]
+        assert_equal 1 [r exhsetnx tairhashkey field2 val2]
+        assert_equal 0 [r exhsetnx tairhashkey field2 val2] "err while hsetnx"
     }
 
     test {Exhmset} {
-        r del exhashkey
+        r del tairhashkey
 
-        catch {r exhmset exhashkey field1 val1 field2} err
+        catch {r exhmset tairhashkey field1 val1 field2} err
         assert_match {*ERR*wrong*number*of*arguments*} $err
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        assert_equal OK [r exhmset exhashkey field1 val1 field2 val2]
-        set result [r exhmget exhashkey field1 field2 field-not-exist]
+        assert_equal OK [r exhmset tairhashkey field1 val1 field2 val2]
+        set result [r exhmget tairhashkey field1 field2 field-not-exist]
         assert_equal $result {val1 val2 {}}
     }
 
     test {Exhver} {
-        r del exhashkey
+        r del tairhashkey
 
-        assert_equal 1 [r exhset exhashkey field val]
-        assert_equal 1 [r exhver exhashkey field]
+        assert_equal 1 [r exhset tairhashkey field val]
+        assert_equal 1 [r exhver tairhashkey field]
 
-        assert_equal 0 [r exhset exhashkey field val]
-        assert_equal 2 [r exhver exhashkey field]
+        assert_equal 0 [r exhset tairhashkey field val]
+        assert_equal 2 [r exhver tairhashkey field]
 
-        assert_equal -1 [r exhver exhashkey-not-exist field1]
-        assert_equal -2 [r exhver exhashkey field-not-exist]
+        assert_equal -1 [r exhver tairhashkey-not-exist field1]
+        assert_equal -2 [r exhver tairhashkey field-not-exist]
     }
 
     test {Exhttl} {
-        r del exhashkey
+        r del tairhashkey
 
         set ttl 100
-        assert_equal 1 [r exhset exhashkey field1 val1 EX $ttl]
-        assert_equal $ttl [r exhttl exhashkey field1]
+        assert_equal 1 [r exhset tairhashkey field1 val1 EX $ttl]
+        assert_equal $ttl [r exhttl tairhashkey field1]
 
-        assert_equal 1 [r exhset exhashkey field2 val2]
-        assert_equal -1 [r exhttl exhashkey field2]
+        assert_equal 1 [r exhset tairhashkey field2 val2]
+        assert_equal -1 [r exhttl tairhashkey field2]
 
-        assert_equal -2 [r exhttl exhashkey-not-exist field1]
-        assert_equal -3 [r exhttl exhashkey field-not-exist]
+        assert_equal -2 [r exhttl tairhashkey-not-exist field1]
+        assert_equal -3 [r exhttl tairhashkey field-not-exist]
     }
 
     test {Exhver} {
-        r del exhashkey
+        r del tairhashkey
 
-        assert_equal 1 [r exhset exhashkey field val]
-        assert_equal 1 [r exhver exhashkey field]
+        assert_equal 1 [r exhset tairhashkey field val]
+        assert_equal 1 [r exhver tairhashkey field]
 
-        assert_equal 1 [r exhsetver exhashkey field 10]
-        assert_equal 10 [r exhver exhashkey field]
+        assert_equal 1 [r exhsetver tairhashkey field 10]
+        assert_equal 10 [r exhver tairhashkey field]
 
-        assert_equal 0 [r exhset exhashkey field val]
-        assert_equal 11 [r exhver exhashkey field]
+        assert_equal 0 [r exhset tairhashkey field val]
+        assert_equal 11 [r exhver tairhashkey field]
 
-        assert_equal 0 [r exhsetver exhashkey-not-exist field1 10]
-        assert_equal 0 [r exhsetver exhashkey field-not-exist 10]
+        assert_equal 0 [r exhsetver tairhashkey-not-exist field1 10]
+        assert_equal 0 [r exhsetver tairhashkey field-not-exist 10]
 
-        assert_equal -1 [r exhver exhashkey-not-exist field1]
-        assert_equal -2 [r exhver exhashkey field-not-exist]
+        assert_equal -1 [r exhver tairhashkey-not-exist field1]
+        assert_equal -2 [r exhver tairhashkey field-not-exist]
 
-        catch {r exhsetver exhashkey field -1} err
+        catch {r exhsetver tairhashkey field -1} err
         assert_match {*ERR*syntax*error*} $err
 
-        catch {r exhsetver exhashkey field 0} err
+        catch {r exhsetver tairhashkey field 0} err
         assert_match {*ERR*syntax*error*} $err
     }
 
     test {Exhver when expire} {
-        r del exhashkey
+        r del tairhashkey
 
-        assert_equal 1 [r exhset exhashkey field val PX 100]
-        assert_equal 1 [r exhver exhashkey field]
+        assert_equal 1 [r exhset tairhashkey field val PX 100]
+        assert_equal 1 [r exhver tairhashkey field]
 
         after 2000
 
-        set ret_val [r exists exhashkey]
+        set ret_val [r exists tairhashkey]
         assert_equal 0 $ret_val
 
-        assert_equal -1 [r exhver exhashkey field]
+        assert_equal -1 [r exhver tairhashkey field]
 
-        r del exhashkey
+        r del tairhashkey
 
-        assert_equal 1 [r exhset exhashkey field val EX 2]
-        assert_equal 1 [r exhver exhashkey field]
+        assert_equal 1 [r exhset tairhashkey field val EX 2]
+        assert_equal 1 [r exhver tairhashkey field]
 
-        assert_equal 1 [r exhsetver exhashkey field 10]
-        assert_equal 10 [r exhver exhashkey field]
+        assert_equal 1 [r exhsetver tairhashkey field 10]
+        assert_equal 10 [r exhver tairhashkey field]
 
         after 3000
 
-        assert_equal 0 [r exhsetver exhashkey field 10]
-        assert_equal -1 [r exhver exhashkey field]
+        assert_equal 0 [r exhsetver tairhashkey field 10]
+        assert_equal -1 [r exhver tairhashkey field]
     }
 
     test {Exhexpire/exhexpireat} {
-        r del exhashkey
+        r del tairhashkey
 
-        assert_equal 1 [r exhset exhashkey field val]
-        assert_equal -1 [r exhttl exhashkey field]
+        assert_equal 1 [r exhset tairhashkey field val]
+        assert_equal -1 [r exhttl tairhashkey field]
 
-        assert_equal 1 [r exhexpire exhashkey field 100]
-        assert_equal 100 [r exhttl exhashkey field]
-        assert_equal 1 [r exhexists exhashkey field]
+        assert_equal 1 [r exhexpire tairhashkey field 100]
+        assert_equal 100 [r exhttl tairhashkey field]
+        assert_equal 1 [r exhexists tairhashkey field]
 
-        assert_equal 1 [r exhexpireat exhashkey field 100]
-        assert_equal 0 [r exhexists exhashkey field]
+        assert_equal 1 [r exhexpireat tairhashkey field 100]
+        assert_equal 0 [r exhexists tairhashkey field]
     }
 
     test {Exhexpire/exhexpireat with params} {
-        r del exhashkey
+        r del tairhashkey
 
-        assert_equal 1 [r exhset exhashkey field val]
-        assert_equal 1 [r exhver exhashkey field ]
-        catch {r exhexpire exhashkey field 100 VER 2} err
+        assert_equal 1 [r exhset tairhashkey field val]
+        assert_equal 1 [r exhver tairhashkey field ]
+        catch {r exhexpire tairhashkey field 100 VER 2} err
         assert_match {*ERR*update*version*is*stale*} $err
-        assert_equal -1 [r exhttl exhashkey field]
-        assert_equal 1 [r exhexpire exhashkey field 100 VER 1]
-        assert_equal 100 [r exhttl exhashkey field]
-        assert_equal 1 [r exhver exhashkey field ]
-        assert_equal 1 [r exhexpire exhashkey field 200 VER 0]
-        assert_equal 200 [r exhttl exhashkey field]
+        assert_equal -1 [r exhttl tairhashkey field]
+        assert_equal 1 [r exhexpire tairhashkey field 100 VER 1]
+        assert_equal 100 [r exhttl tairhashkey field]
+        assert_equal 1 [r exhver tairhashkey field ]
+        assert_equal 1 [r exhexpire tairhashkey field 200 VER 0]
+        assert_equal 200 [r exhttl tairhashkey field]
     }
 
     test {SwapDB with active expire} {
@@ -1237,7 +1248,6 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
 
         set info [r exhexpireinfo]
         assert { [string match "*db: 11, active_expired_fields: 30*" $info] }
-        assert { [string match "*11 -> 10*" $info] }
 
         r select 10
         create_big_tairhash_with_expire exk1 20 2
@@ -1252,215 +1262,233 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal 0 [r dbsize]   
         set info [r exhexpireinfo]
         assert { [string match "*db: 10, active_expired_fields: 60*db: 12, active_expired_fields: 30*" $info] }
-        assert { [string match "*11 -> 10*12 -> 11*10 -> 12*" $info] }
+    }
+
+    test {Copy with active expire} {
+        r del tairhashkey
+        r del tairhashkey_new
+        assert_equal 1 [r exhset tairhashkey field1 val1 ex 2]
+        assert_equal 1 [r exhset tairhashkey field2 val2 ex 1]
+
+        assert_equal 1 [r copy tairhashkey tairhashkey_new]
+
+        set slave_ttl [r exhttl tairhashkey_new field1]
+        assert {$slave_ttl <= 2 && $slave_ttl > 0 }
+
+        set slave_ttl [r exhttl tairhashkey_new field2]
+        assert {$slave_ttl <= 1 && $slave_ttl > 0 }
+
+        after 3000
+
+        assert_equal 0 [r exists tairhashkey_new]
     }
 
     test {Reload after Exhset } {
-        r del exhashkey
+        r del tairhashkey
         set val exhsetfieldvalue
-        assert_equal 1 [r exhset exhashkey field $val]
+        assert_equal 1 [r exhset tairhashkey field $val]
         r debug reload
-        assert_equal 1 [r exhexists exhashkey field]
-        assert_equal $val [r exhget exhashkey field]
-        assert_equal -1 [r exhttl exhashkey field]
-        assert_equal -1 [r exhttl exhashkey field]
+        assert_equal 1 [r exhexists tairhashkey field]
+        assert_equal $val [r exhget tairhashkey field]
+        assert_equal -1 [r exhttl tairhashkey field]
+        assert_equal -1 [r exhttl tairhashkey field]
     }
 
-    test {Reload after Exhash field expire } {
-        r del exhashkey
+    test {Reload after tairhash field expire } {
+        r del tairhashkey
         set val exhsetfieldvalue
-        assert_equal 1 [r exhset exhashkey field $val EXAT 5]
+        assert_equal 1 [r exhset tairhashkey field $val EXAT 5]
         r debug reload
-        assert_equal 0 [r exhexists exhashkey field]
+        assert_equal 0 [r exhexists tairhashkey field]
     }
 
-    test {Exhash aof} {
-        r del exhashkey
-        set new_field [r exhset exhashkey field val EX 50]
+    test {tairhash aof} {
+        r del tairhashkey
+        set new_field [r exhset tairhashkey field val EX 50]
         assert_equal 1 $new_field
 
-        set new_field [r exhset exhashkey field val EX 3]
+        set new_field [r exhset tairhashkey field val EX 3]
         assert_equal 0 $new_field
 
-        set new_field [r exhset exhashkey field2 val2]
+        set new_field [r exhset tairhashkey field2 val2]
         assert_equal 1 $new_field
 
-        set ret_ver [r exhver exhashkey field]
+        set ret_ver [r exhver tairhashkey field]
         assert_equal 2 $ret_ver
 
         r bgrewriteaof
         waitForBgrewriteaof r
         r debug loadaof
 
-        set ret_val [r exhget exhashkey field]
+        set ret_val [r exhget tairhashkey field]
         assert_equal val $ret_val
 
-        set ret_ver [r exhver exhashkey field]
+        set ret_ver [r exhver tairhashkey field]
         assert_equal 2 $ret_ver
 
         after 4000
 
-        set ret_ver [r exhver exhashkey field]
+        set ret_ver [r exhver tairhashkey field]
         assert_equal -2 $ret_ver
 
-        set ret_ver [r exhver exhashkey field2]
+        set ret_ver [r exhver tairhashkey field2]
         assert_equal 1 $ret_ver
     }
 
-    test {Exhash type} {
-        r del exhashkey
+    test {tairhash type} {
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field val]
+        set new_field [r exhset tairhashkey field val]
         assert_equal 1 $new_field
 
-        set res [r type exhashkey]
-        assert_equal $res "exhash---"
+        set res [r type tairhashkey]
+        assert_equal $res "tairhash-"
     }
 
-    test {Exhash get when last field expired} {
-        r del exhashkey
+    test {tairhash get when last field expired} {
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field val PX 500]
+        set new_field [r exhset tairhashkey field val PX 500]
         assert_equal 1 $new_field
 
-        set ret [r exhget exhashkey field]
+        set ret [r exhget tairhashkey field]
         assert_equal val $ret
 
         after 1000
 
-        set ret [r exhget exhashkey field]
+        set ret [r exhget tairhashkey field]
         assert_equal "" $ret
 
-        # set ret [r exhdel exhashkey field]
+        # set ret [r exhdel tairhashkey field]
         # assert_equal 0 $ret
 
-        set ret [r exhlen exhashkey]
+        set ret [r exhlen tairhashkey]
         assert_equal 0 $ret
 
-        set res [r exists exhashkey]
-        assert_equal 0 $res "assert fail, exhash still exist"
+        set res [r exists tairhashkey]
+        assert_equal 0 $res "assert fail, tairhash still exist"
     }
 
-    test {Exhash active expired} {
-        r del exhashkey
+    test {tairhash active expired} {
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field val EX 1]
+        set new_field [r exhset tairhashkey field val EX 1]
         assert_equal 1 $new_field
 
-        set ret [r exhget exhashkey field]
+        set ret [r exhget tairhashkey field]
         assert_equal val $ret
 
         after 3000
 
-        set res [r exists exhashkey]
-        assert_equal 0 $res "assert fail, exhash still exist"
+        set res [r exists tairhashkey]
+        assert_equal 0 $res "assert fail, tairhash still exist"
 
     }
 
     test {Exhgetwithver} {
-        r del exhashkey
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field val]
+        set new_field [r exhset tairhashkey field val]
         assert_equal 1 $new_field
 
-        set ret [r exhgetwithver exhashkey field]
+        set ret [r exhgetwithver tairhashkey field]
         assert_equal "val 1" $ret
     }
 
     test {Exhmgetwithver} {
-        r del exhashkey
+        r del tairhashkey
 
-        assert_equal 1 [r exhset exhashkey field1 val1]
-        assert_equal 1 [r exhset exhashkey field2 val2]
+        assert_equal 1 [r exhset tairhashkey field1 val1]
+        assert_equal 1 [r exhset tairhashkey field2 val2]
 
-        set result [r exhmgetwithver exhashkey field1 field2 field-not-exist]
+        set result [r exhmgetwithver tairhashkey field1 field2 field-not-exist]
         assert_equal $result {{val1 1} {val2 1} {}}
 
-        set result [r exhmgetwithver exhashkey-not-exist field1 field2 field-not-exist]
+        set result [r exhmgetwithver tairhashkey-not-exist field1 field2 field-not-exist]
         assert_equal $result {{} {} {}}
     }
 
     test {Exhmsetwithopts} {
-        r del exhashkey
+        r del tairhashkey
 
-        assert_equal OK [r exhmsetwithopts exhashkey field1 val1 4 10 field2 val2 4 10]
-        catch {r exhmsetwithopts exhashkey field1 val1 4 10 field2 val2 4 10} err
+        assert_equal OK [r exhmsetwithopts tairhashkey field1 val1 4 10 field2 val2 4 10]
+        catch {r exhmsetwithopts tairhashkey field1 val1 4 10 field2 val2 4 10} err
         assert_match {*ERR*update*version*is*stale} $err
-        assert_equal OK [r exhmsetwithopts exhashkey field1 val1 1 0 field2 val2 1 3]
+        assert_equal OK [r exhmsetwithopts tairhashkey field1 val1 1 0 field2 val2 1 3]
 
         after 1000
-        assert_equal "val1 2" [r exhgetwithver exhashkey field1]
-        assert_equal "val2 2" [r exhgetwithver exhashkey field2]
+        assert_equal "val1 2" [r exhgetwithver tairhashkey field1]
+        assert_equal "val2 2" [r exhgetwithver tairhashkey field2]
 
         after 2200
-        assert_equal "val1 2" [r exhgetwithver exhashkey field1]
-        assert_equal "" [r exhgetwithver exhashkey field2]
+        assert_equal "val1 2" [r exhgetwithver tairhashkey field1]
+        assert_equal "" [r exhgetwithver tairhashkey field2]
     }
 
     test {Exhmsetwithopts active expire} {
-        r del exhashkey
+        r del tairhashkey
 
-        assert_equal OK [r exhmsetwithopts exhashkey field1 val1 4 10 field2 val2 4 10]
-        assert_equal OK [r exhmsetwithopts exhashkey field1 val1 1 0 field2 val2 1 2]
+        assert_equal OK [r exhmsetwithopts tairhashkey field1 val1 4 10 field2 val2 4 10]
+        assert_equal OK [r exhmsetwithopts tairhashkey field1 val1 1 0 field2 val2 1 2]
 
         after 1000
-        assert_equal "val1 2" [r exhgetwithver exhashkey field1]
-        assert_equal "val2 2" [r exhgetwithver exhashkey field2]
+        assert_equal "val1 2" [r exhgetwithver tairhashkey field1]
+        assert_equal "val2 2" [r exhgetwithver tairhashkey field2]
 
         after 3000
-        assert_equal 1 [r exhlen exhashkey]
+        assert_equal 1 [r exhlen tairhashkey]
     }
 
-    test {Exhash set ignore version} {
-        r del exhashkey
+    test {tairhash set ignore version} {
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field val]
+        set new_field [r exhset tairhashkey field val]
         assert_equal 1 $new_field
 
-        set ret [r exhgetwithver exhashkey field]
+        set ret [r exhgetwithver tairhashkey field]
         assert_equal "val 1" $ret
 
-        catch {r exhset exhashkey field val1 VER 10} err
+        catch {r exhset tairhashkey field val1 VER 10} err
         assert_match {*ERR*update*version*is*stale} $err
 
-        set new_field [r exhset exhashkey field val1 VER 0]
+        set new_field [r exhset tairhashkey field val1 VER 0]
         assert_equal 0 $new_field
 
-        set ret [r exhgetwithver exhashkey field]
+        set ret [r exhgetwithver tairhashkey field]
         assert_equal "val1 2" $ret
     }
 
-    test {Exhash dump/restore} {
-        r del exhashkey
+    test {tairhash dump/restore} {
+        r del tairhashkey
 
-        set new_field [r exhset exhashkey field val]
+        set new_field [r exhset tairhashkey field val]
         assert_equal 1 $new_field
 
-        set dump [r dump exhashkey]
-        r del exhashkey
+        set dump [r dump tairhashkey]
+        r del tairhashkey
 
-        assert_equal "OK" [r restore exhashkey 0 $dump]
+        assert_equal "OK" [r restore tairhashkey 0 $dump]
 
-        set ret [r exhgetwithver exhashkey field]
+        set ret [r exhgetwithver tairhashkey field]
         assert_equal "val 1" $ret
     }
 
     test "EXHSCAN" {
         # Create the Hash
-        r del exhashkey
+        r del tairhashkey
         set count 1000
         set elements {}
         for {set j 0} {$j < $count} {incr j} {
             lappend elements key:$j $j
         }
-        r exhmset exhashkey {*}$elements
+        r exhmset tairhashkey {*}$elements
 
 
         # Test HSCAN
         set cur 0
         set keys {}
         while 1 {
-            set res [r exhscan exhashkey $cur]
+            set res [r exhscan tairhashkey $cur]
             set cur [lindex $res 0]
             set k [lindex $res 1]
             lappend keys {*}$k
@@ -1478,14 +1506,14 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
     }
 
     test "EXHSCAN with PATTERN" {
-        r del exhashkey
-        r exhmset exhashkey foo 1 fab 2 fiz 3 foobar 10 1 a 2 b 3 c 4 d
-        set res [r exhscan exhashkey 0 MATCH foo* COUNT 10000]
+        r del tairhashkey
+        r exhmset tairhashkey foo 1 fab 2 fiz 3 foobar 10 1 a 2 b 3 c 4 d
+        set res [r exhscan tairhashkey 0 MATCH foo* COUNT 10000]
         lsort -unique [lindex $res 1]
     } {1 10 foo foobar}
     
 
-    start_server {tags {"exhash repl"} overrides {bind 0.0.0.0}} {
+    start_server {tags {"tairhash repl"} overrides {bind 0.0.0.0}} {
         r module load $testmodule
         set slave [srv 0 client]
         set slave_host [srv 0 host]
@@ -1508,120 +1536,120 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
             }
 
             test {Exhset/exhget master-slave} {
-                $master del exhashkey
+                $master del tairhashkey
 
-                set new_field [$master exhset exhashkey field val EX 2]
+                set new_field [$master exhset tairhashkey field val EX 2]
                 assert_equal 1 $new_field
 
-                set ret_val [$master exhget exhashkey field]
+                set ret_val [$master exhget tairhashkey field]
                 assert_equal val $ret_val
 
                 $master WAIT 1 5000
 
-                set ret_val [$slave exhget exhashkey field]
+                set ret_val [$slave exhget tairhashkey field]
                 assert_equal val $ret_val
 
                 after 4000
 
-                set ret_val [$slave exhget exhashkey field]
+                set ret_val [$slave exhget tairhashkey field]
                 assert_equal "" $ret_val
 
-                set ret_val [$master exhget exhashkey field]
+                set ret_val [$master exhget tairhashkey field]
                 assert_equal "" $ret_val
             }
 
             test {Exhexpire/exhexpireat master-slave} {
-                $master del exhashkey
+                $master del tairhashkey
 
-                assert_equal 1 [$master exhset exhashkey field val]
+                assert_equal 1 [$master exhset tairhashkey field val]
                 $master WAIT 1 5000
-                assert_equal -1 [$slave exhttl exhashkey field]
+                assert_equal -1 [$slave exhttl tairhashkey field]
 
-                assert_equal 1 [$master exhexpire exhashkey field 100]
+                assert_equal 1 [$master exhexpire tairhashkey field 100]
 
                 $master WAIT 1 5000
 
-                set slave_ttl [$slave exhttl exhashkey field]
+                set slave_ttl [$slave exhttl tairhashkey field]
                 assert {$slave_ttl <= 100 && $slave_ttl >=90 }
-                assert_equal 1 [$slave exhexists exhashkey field]
+                assert_equal 1 [$slave exhexists tairhashkey field]
             }
 
             test {Exhsetver master-slave} {
-                $master del exhashkey
+                $master del tairhashkey
 
-                assert_equal 1 [$master exhset exhashkey field val]
+                assert_equal 1 [$master exhset tairhashkey field val]
                 $master WAIT 1 5000
-                assert_equal 1 [$slave exhver exhashkey field]
+                assert_equal 1 [$slave exhver tairhashkey field]
 
-                assert_equal 1 [$master exhsetver exhashkey field 10]
+                assert_equal 1 [$master exhsetver tairhashkey field 10]
                 $master WAIT 1 5000
-                assert_equal 10 [$slave exhver exhashkey field]
+                assert_equal 10 [$slave exhver tairhashkey field]
             }
 
             test {Exhgetall master-slave} {
-                $master del exhashkey
+                $master del tairhashkey
 
-                assert_equal 1 [$master exhset exhashkey field1 val1 PX 100]
-                assert_equal 1 [$master exhset exhashkey field2 val2 PX 200]
-                assert_equal 1 [$master exhset exhashkey field3 val3]
+                assert_equal 1 [$master exhset tairhashkey field1 val1 PX 100]
+                assert_equal 1 [$master exhset tairhashkey field2 val2 PX 200]
+                assert_equal 1 [$master exhset tairhashkey field3 val3]
 
                 $master WAIT 1 5000
 
-                assert_equal [lsort [$slave exhvals exhashkey]] [lsort {val1 val2 val3}]
-                assert_equal [lsort [$slave exhkeys exhashkey]] [lsort {field1 field2 field3}]
-                assert_equal [lsort [$slave exhgetall exhashkey]] [lsort {field1 val1 field2 val2 field3 val3}]
+                assert_equal [lsort [$slave exhvals tairhashkey]] [lsort {val1 val2 val3}]
+                assert_equal [lsort [$slave exhkeys tairhashkey]] [lsort {field1 field2 field3}]
+                assert_equal [lsort [$slave exhgetall tairhashkey]] [lsort {field1 val1 field2 val2 field3 val3}]
 
                 after 500
 
-                assert_equal [lsort [$slave exhvals exhashkey]] [lsort {val3}]
-                assert_equal [lsort [$slave exhkeys exhashkey]] [lsort {field3}]
-                assert_equal [lsort [$slave exhgetall exhashkey]] [lsort {field3 val3}]
+                assert_equal [lsort [$slave exhvals tairhashkey]] [lsort {val3}]
+                assert_equal [lsort [$slave exhkeys tairhashkey]] [lsort {field3}]
+                assert_equal [lsort [$slave exhgetall tairhashkey]] [lsort {field3 val3}]
             }
 
             test {Active expire master-slave} {
                 $master select 0
-                $master del exhashkey
+                $master del tairhashkey
 
-                set new_field [$master exhset exhashkey field1 val EX 1]
+                set new_field [$master exhset tairhashkey field1 val EX 1]
                 assert_equal 1 $new_field
 
-                set ret_val [$master exhget exhashkey field1]
+                set ret_val [$master exhget tairhashkey field1]
                 assert_equal val $ret_val
 
-                set new_field [$master exhset exhashkey field2 val EX 3]
+                set new_field [$master exhset tairhashkey field2 val EX 3]
                 assert_equal 1 $new_field
 
-                set ret_val [$master exhget exhashkey field2]
+                set ret_val [$master exhget tairhashkey field2]
                 assert_equal val $ret_val
 
                 $master select 9
-                $master del exhashkey
+                $master del tairhashkey
 
-                set new_field [$master exhset exhashkey field1 val EX 1]
+                set new_field [$master exhset tairhashkey field1 val EX 1]
                 assert_equal 1 $new_field
 
-                set ret_val [$master exhget exhashkey field1]
+                set ret_val [$master exhget tairhashkey field1]
                 assert_equal val $ret_val
 
-                set new_field [$master exhset exhashkey field2 val EX 3]
+                set new_field [$master exhset tairhashkey field2 val EX 3]
                 assert_equal 1 $new_field
 
-                set ret_val [$master exhget exhashkey field2]
+                set ret_val [$master exhget tairhashkey field2]
                 assert_equal val $ret_val
 
                 $master select 15
-                $master del exhashkey
+                $master del tairhashkey
 
-                set new_field [$master exhset exhashkey field1 val EX 1]
+                set new_field [$master exhset tairhashkey field1 val EX 1]
                 assert_equal 1 $new_field
 
-                set ret_val [$master exhget exhashkey field1]
+                set ret_val [$master exhget tairhashkey field1]
                 assert_equal val $ret_val
 
-                set new_field [$master exhset exhashkey field2 val EX 3]
+                set new_field [$master exhset tairhashkey field2 val EX 3]
                 assert_equal 1 $new_field
 
-                set ret_val [$master exhget exhashkey field2]
+                set ret_val [$master exhget tairhashkey field2]
                 assert_equal val $ret_val
 
                 $master WAIT 1 5000
@@ -1629,173 +1657,173 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
                 after 2000
                 $slave select 0
 
-                set h_len [$slave exhlen exhashkey]
+                set h_len [$slave exhlen tairhashkey]
                 assert {$h_len <= 1 && $h_len >=0 }
 
-                set ret_val [$slave exhget exhashkey field1]
+                set ret_val [$slave exhget tairhashkey field1]
                 assert_equal "" $ret_val
 
                 $slave select 9
-                set h_len [$slave exhlen exhashkey]
+                set h_len [$slave exhlen tairhashkey]
                 assert {$h_len <= 1 && $h_len >=0 }
 
-                set ret_val [$slave exhget exhashkey field1]
+                set ret_val [$slave exhget tairhashkey field1]
                 assert_equal "" $ret_val
 
                 $slave select 15
-                set h_len [$slave exhlen exhashkey]
+                set h_len [$slave exhlen tairhashkey]
                 assert {$h_len <= 1 && $h_len >=0 }
 
-                set ret_val [$slave exhget exhashkey field1]
+                set ret_val [$slave exhget tairhashkey field1]
                 assert_equal "" $ret_val
 
                 after 3000
 
                 $slave select 0
-                set h_len [$slave exhlen exhashkey]
+                set h_len [$slave exhlen tairhashkey]
                 assert_equal 0 $h_len
 
-                set ret_val [$slave exhget exhashkey field2]
+                set ret_val [$slave exhget tairhashkey field2]
                 assert_equal "" $ret_val
 
-                set ret_val [r exists exhashkey]
+                set ret_val [r exists tairhashkey]
                 assert_equal 0 $ret_val
 
                 $slave select 9
-                set h_len [$slave exhlen exhashkey]
+                set h_len [$slave exhlen tairhashkey]
                 assert_equal 0 $h_len
 
-                set ret_val [$slave exhget exhashkey field2]
+                set ret_val [$slave exhget tairhashkey field2]
                 assert_equal "" $ret_val
 
-                set ret_val [r exists exhashkey]
+                set ret_val [r exists tairhashkey]
                 assert_equal 0 $ret_val
 
                 $slave select 15
-                set h_len [$slave exhlen exhashkey]
+                set h_len [$slave exhlen tairhashkey]
                 assert_equal 0 $h_len
 
-                set ret_val [$slave exhget exhashkey field2]
+                set ret_val [$slave exhget tairhashkey field2]
                 assert_equal "" $ret_val
 
-                set ret_val [r exists exhashkey]
+                set ret_val [r exists tairhashkey]
                 assert_equal 0 $ret_val
             }
 
             test {Exhincrby master-slave} {
-                $master del exhashkey
+                $master del tairhashkey
 
                 set incr_val 9
-                set new_cnt [$master exhincrby exhashkey field $incr_val]
+                set new_cnt [$master exhincrby tairhashkey field $incr_val]
                 assert_equal $incr_val $new_cnt
 
                 $master WAIT 1 5000
 
-                set val [$slave exhget exhashkey field]
+                set val [$slave exhget tairhashkey field]
                 assert_equal $incr_val $val
             }
 
             test {Exhincrbyfloat master-slave} {
-                $master del exhashkey
+                $master del tairhashkey
 
                 set float_incr_val 0.9
-                set new_cnt [$master exhincrbyfloat exhashkey field $float_incr_val]
+                set new_cnt [$master exhincrbyfloat tairhashkey field $float_incr_val]
                 assert_equal $float_incr_val $new_cnt
 
                 $master WAIT 1 5000
 
-                set val [$slave exhget exhashkey field]
+                set val [$slave exhget tairhashkey field]
                 assert_equal $float_incr_val $val
             }
 
             test {Exhgetwithver master-slave} {
-                $master del exhashkey
+                $master del tairhashkey
 
-                set new_field [$master exhset exhashkey field val EX 2]
+                set new_field [$master exhset tairhashkey field val EX 2]
                 assert_equal 1 $new_field
 
-                set ret [$master exhgetwithver exhashkey field]
+                set ret [$master exhgetwithver tairhashkey field]
                 assert_equal "val 1" $ret
 
                 $master WAIT 1 5000
 
-                set ret [$slave exhgetwithver exhashkey field]
+                set ret [$slave exhgetwithver tairhashkey field]
                 assert_equal "val 1" $ret
 
                 after 3000
 
-                set ret [$slave exhgetwithver exhashkey field]
+                set ret [$slave exhgetwithver tairhashkey field]
                 assert_equal "" $ret
             }
 
             test {Exhdel} {
-                $master del exhashkey
+                $master del tairhashkey
 
-                set new_field [$master exhset exhashkey field1 val1]
+                set new_field [$master exhset tairhashkey field1 val1]
                 assert_equal 1 $new_field
 
-                set new_field [$master exhset exhashkey field2 val2]
+                set new_field [$master exhset tairhashkey field2 val2]
                 assert_equal 1 $new_field
 
                 $master WAIT 1 5000
 
-                set ret_val [$slave exhget exhashkey field1]
+                set ret_val [$slave exhget tairhashkey field1]
                 assert_equal val1 $ret_val
 
-                set ret_val [$slave exhget exhashkey field2]
+                set ret_val [$slave exhget tairhashkey field2]
                 assert_equal val2 $ret_val
 
-                set del_num [$master exhdel exhashkey field1]
+                set del_num [$master exhdel tairhashkey field1]
                 assert_equal 1 $del_num
 
                 $master WAIT 1 5000
 
-                set ret_val [$slave exhget exhashkey field1]
+                set ret_val [$slave exhget tairhashkey field1]
                 assert_equal "" $ret_val
 
-                set del_num [$master exhdel exhashkey field1 field2 field3]
+                set del_num [$master exhdel tairhashkey field1 field2 field3]
                 assert_equal 1 $del_num
 
                 $master WAIT 1 5000
 
-                set ret_val [$slave exhget exhashkey field2]
+                set ret_val [$slave exhget tairhashkey field2]
                 assert_equal "" $ret_val
 
-                set exist_num [$slave exists exhashkey]
+                set exist_num [$slave exists tairhashkey]
                 assert_equal 0 $exist_num
             }
 
             test {Exhexists} {
-                $master del exhashkey
+                $master del tairhashkey
 
-                set exist_num [$master exhexists exhashkey field]
+                set exist_num [$master exhexists tairhashkey field]
                 assert_equal 0 $exist_num
 
-                set exist_num [$slave exhexists exhashkey field]
+                set exist_num [$slave exhexists tairhashkey field]
                 assert_equal 0 $exist_num
 
-                set new_field [$master exhset exhashkey field1 val]
+                set new_field [$master exhset tairhashkey field1 val]
                 assert_equal 1 $new_field
 
-                set exist_num [$master exhexists exhashkey field1]
+                set exist_num [$master exhexists tairhashkey field1]
                 assert_equal 1 $exist_num
 
                 $master WAIT 1 5000
 
-                set exist_num [$slave exhexists exhashkey field1]
+                set exist_num [$slave exhexists tairhashkey field1]
                 assert_equal 1 $exist_num
 
-                set new_field [r exhset exhashkey field2 val EX 2]
+                set new_field [r exhset tairhashkey field2 val EX 2]
                 assert_equal 1 $new_field
 
                 $master WAIT 1 5000
 
-                set exist_num [$slave exhexists exhashkey field2]
+                set exist_num [$slave exhexists tairhashkey field2]
                 assert_equal 1 $exist_num
 
                 after 3000
 
-                set exist_num [$slave exhexists exhashkey field2]
+                set exist_num [$slave exhexists tairhashkey field2]
                 assert_equal 0 $exist_num
             }
 
@@ -1819,10 +1847,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
 
                 after 3000
                 assert_equal 0 [$master dbsize]   
-                assert_equal 0 [$slave dbsize]   
-
-                set info [$slave exhexpireinfo]
-                assert { [string match "*11 -> 10*" $info] }
+                assert_equal 0 [$slave dbsize]  
             }
         }
     }

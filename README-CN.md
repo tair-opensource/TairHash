@@ -8,7 +8,7 @@
 - field支持单独设置expire和version
 - 针对field支持高效的active expire和passivity expire
 - 语法和原生hash数据类型类似
-- 支持swapdb、rename和move等会导致排序索引失效的redis命令
+- 支持redis的swapdb、rename、move、copy等语义
 
 ### 注意，该module只适用于redis 6.2之后的版本
 

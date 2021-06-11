@@ -8,7 +8,7 @@
 - Field supports setting expire and version
 - Support efficient active expire and passivity expire for field
 - The cmd is similar to the native hash data type
-- Support swapdb, rename, move and other redis commands that will cause the sort index to fail
+- Support redis swapdb, rename, move and copy command
 
 ### Note this module can only be used for versions after redis 6.2
 

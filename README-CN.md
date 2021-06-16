@@ -10,8 +10,6 @@
 - 语法和原生hash数据类型类似
 - 支持redis的swapdb、rename、move、copy等语义
 
-### 注意，该module只适用于redis 6.2之后的版本
-
 ### 高效过期实现原理：
 ![avatar](imgs/tairhash_index.png)
 
@@ -88,3 +86,7 @@ cmake ../ && make -j
 
 ## API
 [参考这里](CMDDOC-CN.md)
+
+<br/>
+
+注意，该module只适用于redis最新的unstable分支 

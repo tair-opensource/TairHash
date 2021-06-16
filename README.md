@@ -9,9 +9,6 @@
 - Support efficient active expire and passivity expire for field
 - The cmd is similar to the native hash data type
 - Support redis swapdb, rename, move and copy command
-
-### Note this module can only be used for versions after redis 6.2
-
 ### The principle of efficient expiration:
 ![avatar](imgs/tairhash_index.png)
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
@@ -88,3 +85,6 @@ then the tairhash_module.so library file will be generated in the lib directory
 ## API
 [Reference](CMDDOC.md)
 
+
+<br/>
+Note that this module can only be used on the latest unstable branch of redis

@@ -115,7 +115,7 @@ inline RedisModuleString *takeAndRef(RedisModuleString *str) {
             if (cur_expire != new_expire) {                                                        \
                 long long before_min_score = -1;                                                   \
                 m_zskiplistNode *ln = o->expire_index->header->level[0].forward;                   \
-                assert(ln != NULL);                                                                \
+                RedisModule_Assert(ln != NULL);                                                    \
                 before_min_score = ln->score;                                                      \
                 m_zslUpdateScore(o->expire_index, cur_expire, field, new_expire);                  \
                 long long after_min_score = o->expire_index->header->level[0].forward->score;      \
@@ -384,11 +384,11 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
             key = listNodeValue(node);
             real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE);
             int type = RedisModule_KeyType(real_key);
-            assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
+            RedisModule_Assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
             tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
 
             zsl_len = tair_hash_obj->expire_index->length;
-            assert(zsl_len > 0);
+            RedisModule_Assert(zsl_len > 0);
 
             ln2 = tair_hash_obj->expire_index->header->level[0].forward;
             start_index = 0;
@@ -524,7 +524,7 @@ static int keySpaceNotification(RedisModuleCtx *ctx, int type, const char *event
         RedisModule_SelectDb(ctx, local_to_dbid);
         RedisModuleKey *real_key = RedisModule_OpenKey(ctx, local_to_key, REDISMODULE_READ | REDISMODULE_WRITE);
         int type = RedisModule_KeyType(real_key);
-        assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
+        RedisModule_Assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
         tairHashObj *tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
 
         /* Nothting todo */
@@ -624,11 +624,11 @@ inline static void latencySensitivePassiveExpire(RedisModuleCtx *ctx, unsigned i
         real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE);
         int type = RedisModule_KeyType(real_key);
 
-        assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
+        RedisModule_Assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
         tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
 
         zsl_len = tair_hash_obj->expire_index->length;
-        assert(zsl_len > 0);
+        RedisModule_Assert(zsl_len > 0);
 
         start_index = 0;
         ln = tair_hash_obj->expire_index->header->level[0].forward;
@@ -2039,7 +2039,7 @@ int TairHashTypeHdel_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         if (de) {
             tair_hash_val = dictGetVal(de);
             if (tair_hash_val->expire > 0) {
-                assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
+                RedisModule_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
                 before_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
                 m_zslDelete(tair_hash_obj->expire_index, tair_hash_val->expire, argv[j], NULL);
                 if (tair_hash_obj->expire_index->header->level[0].forward) {
@@ -2111,7 +2111,7 @@ int TairHashTypeHdelWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString 
         if (tair_hash_val != NULL) {
             if (ver == 0 || ver == tair_hash_val->version) {
                 if (tair_hash_val->expire > 0) {
-                    assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
+                    RedisModule_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
                     before_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
                     m_zslDelete(tair_hash_obj->expire_index, tair_hash_val->expire, argv[j], NULL);
                     if (tair_hash_obj->expire_index->header->level[0].forward) {

@@ -125,6 +125,14 @@ inline RedisModuleString *takeAndRef(RedisModuleString *str) {
     } while (0)
 
 /* ========================== Internal data structure  =======================*/
+
+/*
+ * We use `version` and `expire` as part of the tairhash value. This may be different 
+ * from the expire on the redis key. Redis regards `expire` as part of the database, not 
+ * part of the key. For example, after you perform a restore on a key, the original expire 
+ * will be Lost unless you specify ttl again. The `version` and `expire` of tairhash will 
+ * be completely recovered after the restore.
+ */
 typedef struct TairHashVal {
     long long version;
     long long expire;

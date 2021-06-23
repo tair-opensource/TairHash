@@ -72,10 +72,10 @@ static RedisModuleType *TairHashType;
 #define DBS_PER_CALL 16
 #define KEYS_PER_LOOP 3
 
-static RedisModuleTimerID expire_timer_id = 0;
+static RedisModuleTimerID expire_timer_id;
 static m_zskiplist *g_expire_index[DB_NUM];
 
-static uint32_t enable_active_expire = 1; /* We start active expire by default */
+static uint32_t enable_active_expire = 1; /* We enable active expire by default. */
 static uint32_t tair_hash_active_expire_period = TAIR_HASH_ACTIVE_EXPIRE_PERIOD;
 static uint32_t tair_hash_active_expire_keys_per_loop = TAIR_HASH_ACTIVE_EXPIRE_KEYS_PER_LOOP;
 static uint32_t tair_hash_active_expire_dbs_per_loop = DBS_PER_CALL;
@@ -145,7 +145,6 @@ static void tairHashValRelease(struct TairHashVal *o) {
         RedisModule_Free(o);
     }
 }
-
 typedef struct tairHashObj {
     dict *hash;
     m_zskiplist *expire_index;
@@ -225,20 +224,6 @@ static struct tairHashObj *createTairHashTypeObject() {
     return o;
 }
 /* ========================== Common  func =============================*/
-static long long ustime(void) {
-    struct timeval tv;
-    long long ust;
-
-    gettimeofday(&tv, NULL);
-    ust = ((long long)tv.tv_sec) * 1000000;
-    ust += tv.tv_usec;
-    return ust;
-}
-
-static inline long long mstime(void) {
-    return ustime() / 1000;
-}
-
 inline static int expireTairHashObjIfNeeded(RedisModuleCtx *ctx, RedisModuleString *key, tairHashObj *o,
                                             RedisModuleString *field, int is_timer) {
     TairHashVal *tair_hash_val = m_dictFetchValue(o->hash, field);
@@ -248,7 +233,7 @@ inline static int expireTairHashObjIfNeeded(RedisModuleCtx *ctx, RedisModuleStri
     long long when = tair_hash_val->expire;
     long long now;
 
-    now = mstime();
+    now = RedisModule_Milliseconds();
 
     if (when == 0) {
         return 0;
@@ -300,7 +285,7 @@ inline static int isExpire(long long when) {
         return 0;
     }
 
-    mstime_t now = mstime();
+    mstime_t now = RedisModule_Milliseconds();
     return now > when;
 }
 
@@ -334,7 +319,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
     long long when, now;
     unsigned long zsl_len;
 
-    long long start = mstime();
+    long long start = RedisModule_Milliseconds();
     for (; i < dbs_per_call; ++i) {
         current_db = current_db % DB_NUM;
         int expire_keys_per_loop = tair_hash_active_expire_keys_per_loop;
@@ -353,7 +338,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
         while (ln && expire_keys_per_loop--) {
             key = ln->member;
             when = ln->score;
-            now = mstime();
+            now = RedisModule_Milliseconds();
             if (when > now) {
                 break;
             }
@@ -423,7 +408,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
         current_db++;
     }
 
-    stat_last_active_expire_time_msec = mstime() - start;
+    stat_last_active_expire_time_msec = RedisModule_Milliseconds() - start;
     stat_max_active_expire_time_msec = stat_max_active_expire_time_msec < stat_last_active_expire_time_msec ? stat_last_active_expire_time_msec : stat_max_active_expire_time_msec;
     total_expire_time += stat_last_active_expire_time_msec;
     ++loop_cnt;
@@ -590,7 +575,7 @@ inline static void latencySensitivePassiveExpire(RedisModuleCtx *ctx, unsigned i
     }
 
     /* Reuse the current time for fields */
-    now = mstime();
+    now = RedisModule_Milliseconds();
 
     /* 2. Enumerates expired keys */
     list *keys = m_listCreate();
@@ -833,7 +818,7 @@ int exhashTTLGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int argc
         if (tair_hash_val->expire == 0) {
             RedisModule_ReplyWithLongLong(ctx, -1);
         } else {
-            long long ttl = tair_hash_val->expire - mstime();
+            long long ttl = tair_hash_val->expire - RedisModule_Milliseconds();
             if (ttl < 0) {
                 ttl = 0;
             }
@@ -999,7 +984,7 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         if (ex_flags & TAIR_HASH_SET_ABS_EXPIRE) {
             milliseconds = expire;
         } else {
-            milliseconds = mstime() + expire;
+            milliseconds = RedisModule_Milliseconds() + expire;
         }
     }
 
@@ -1207,7 +1192,7 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
         tair_hash_val->version++;
         if (when > 0) {
             int dbid = RedisModule_GetSelectedDb(ctx);
-            when = mstime() + when * 1000;
+            when = RedisModule_Milliseconds() + when * 1000;
             if (nokey || tair_hash_val->expire == 0) {
                 ACTIVE_EXPIRE_INSERT(dbid, tair_hash_obj, argv[i], when);
             } else {
@@ -1233,7 +1218,7 @@ int TairHashTypeHpexpireAt_RedisCommand(RedisModuleCtx *ctx, RedisModuleString *
 
 /*  EXHPEXPIRE <key> <field> <milliseconds> [ VER version | ABS version ]*/
 int TairHashTypeHpexpire_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    return exhashExpireGenericFunc(ctx, argv, argc, mstime(), UNIT_MILLISECONDS);
+    return exhashExpireGenericFunc(ctx, argv, argc, RedisModule_Milliseconds(), UNIT_MILLISECONDS);
 }
 
 /*  EXHEXPIREAT <key> <field> <timestamp> [ VER version | ABS version ] */
@@ -1243,7 +1228,7 @@ int TairHashTypeHexpireAt_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **
 
 /*  EXHEXPIRE <key> <field> <seconds> [ VER version | ABS version ] */
 int TairHashTypeHexpire_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    return exhashExpireGenericFunc(ctx, argv, argc, mstime(), UNIT_SECONDS);
+    return exhashExpireGenericFunc(ctx, argv, argc, RedisModule_Milliseconds(), UNIT_SECONDS);
 }
 
 /*  EXHPTTL <key> <field> */
@@ -1540,7 +1525,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         if (ex_flags & TAIR_HASH_SET_ABS_EXPIRE) {
             milliseconds = expire;
         } else {
-            milliseconds = mstime() + expire;
+            milliseconds = RedisModule_Milliseconds() + expire;
         }
     }
 
@@ -1764,7 +1749,7 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
         if (ex_flags & TAIR_HASH_SET_ABS_EXPIRE) {
             milliseconds = expire;
         } else {
-            milliseconds = mstime() + expire;
+            milliseconds = RedisModule_Milliseconds() + expire;
         }
     }
 
@@ -2677,7 +2662,7 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
         hashv->expire = expire;
         hashv->value = takeAndRef(value);
         m_dictAdd(o->hash, takeAndRef(skey), hashv);
-        if (hashv->expire > 0) {
+        if (hashv->expire) {
             if (enable_active_expire) {
                 ACTIVE_EXPIRE_INSERT(dbid, o, skey, hashv->expire);
             }

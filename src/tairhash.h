@@ -23,16 +23,16 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __EXHASH_H__
-#define __EXHASH_H__
+#ifndef __TAIRHASH_H__
+#define __TAIRHASH_H__
 
-#define EXHASH_ERRORMSG_SYNTAX "ERR syntax error"
-#define EXHASH_ERRORMSG_VERSION "ERR update version is stale"
-#define EXHASH_ERRORMSG_NOT_INTEGER "ERR value is not an integer"
-#define EXHASH_ERRORMSG_NOT_FLOAT "ERR value is not an float"
-#define EXHASH_ERRORMSG_OVERFLOW "ERR increment or decrement would overflow"
-#define EXHASH_ERRORMSG_INTERNAL_ERR "ERR internal error"
-#define EXHASH_ERRORMSG_INT_MIN_MAX "ERR min or max is specified, but value is not an integer"
-#define EXHASH_ERRORMSG_FLOAT_MIN_MAX "ERR min or max is specified, but value is not a float"
-#define EXHASH_ERRORMSG_MIN_MAX "ERR min value is bigger than max value"
+#define TAIRHASH_ERRORMSG_SYNTAX "ERR syntax error"
+#define TAIRHASH_ERRORMSG_VERSION "ERR update version is stale"
+#define TAIRHASH_ERRORMSG_NOT_INTEGER "ERR value is not an integer"
+#define TAIRHASH_ERRORMSG_NOT_FLOAT "ERR value is not an float"
+#define TAIRHASH_ERRORMSG_OVERFLOW "ERR increment or decrement would overflow"
+#define TAIRHASH_ERRORMSG_INTERNAL_ERR "ERR internal error"
+#define TAIRHASH_ERRORMSG_INT_MIN_MAX "ERR min or max is specified, but value is not an integer"
+#define TAIRHASH_ERRORMSG_FLOAT_MIN_MAX "ERR min or max is specified, but value is not a float"
+#define TAIRHASH_ERRORMSG_MIN_MAX "ERR min value is bigger than max value"
 #endif

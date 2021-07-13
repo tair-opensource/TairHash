@@ -698,7 +698,7 @@ int exhashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int a
     int nokey;
 
     if (RedisModule_StringToLongLong(argv[3], &milliseconds) != REDISMODULE_OK) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
@@ -719,19 +719,19 @@ int exhashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int a
                 version_p = next;
                 j++;
             } else {
-                RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+                RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
                 return REDISMODULE_ERR;
             }
         }
     }
 
     if ((NULL != version_p) && (RedisModule_StringToLongLong(version_p, &version) != REDISMODULE_OK)) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
     if (version < 0 || ((ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && version == 0)) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
@@ -766,7 +766,7 @@ int exhashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int a
         skey = dictGetKey(de);
         tair_hash_val = dictGetVal(de);
         if (ex_flags & TAIR_HASH_SET_WITH_VER && version != 0 && version != tair_hash_val->version) {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_VERSION);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION);
             return REDISMODULE_ERR;
         }
 
@@ -825,7 +825,7 @@ int exhashTTLGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int argc
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -869,6 +869,29 @@ int mstring2ld(RedisModuleString *val, long double *r_val) {
     }
 
     return REDISMODULE_OK;
+}
+
+void infoFunc(RedisModuleInfoCtx *ctx, int for_crash_report) {
+    RedisModule_InfoAddSection(ctx, "Statistics");
+    RedisModule_InfoAddFieldLongLong(ctx, "active_expire_period", tair_hash_active_expire_period);
+    RedisModule_InfoAddFieldLongLong(ctx, "active_expire_keys_per_loop", tair_hash_active_expire_keys_per_loop);
+    RedisModule_InfoAddFieldLongLong(ctx, "active_expire_dbs_per_loop", tair_hash_active_expire_dbs_per_loop);
+    RedisModule_InfoAddFieldLongLong(ctx, "active_expire_last_time_msec", stat_last_active_expire_time_msec);
+    RedisModule_InfoAddFieldLongLong(ctx, "active_expire_max_time_msec", stat_max_active_expire_time_msec);
+    RedisModule_InfoAddFieldLongLong(ctx, "active_expire_avg_time_msec", stat_avg_active_expire_time_msec);
+    RedisModule_InfoAddFieldLongLong(ctx, "passive_expire_keys_per_loop", tair_hash_passive_expire_keys_per_loop);
+    RedisModule_InfoAddFieldLongLong(ctx, "passive_expire_keys_per_loop", tair_hash_passive_expire_keys_per_loop);
+ 
+    RedisModule_InfoAddSection(ctx, "ActiveExpiredFields");
+    int i;
+    char buf[10];
+    for (i = 0; i < DB_NUM; ++i) {
+        if (g_expire_index[i]->length == 0 && stat_expired_field[i] == 0) {
+            continue;
+        }        
+        snprintf(buf,sizeof(buf), "db%d", i);
+        RedisModule_InfoAddFieldLongLong(ctx, buf, stat_expired_field[i]);  
+    }
 }
 
 /* ========================= "exhash" type commands ======================= */
@@ -929,28 +952,28 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
             version_p = next;
             j++;
         } else {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
             return REDISMODULE_ERR;
         }
     }
 
     if ((NULL != expire_p) && (RedisModule_StringToLongLong(expire_p, &expire) != REDISMODULE_OK)) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
     if (expire_p && expire <= 0) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
     if ((NULL != version_p) && (RedisModule_StringToLongLong(version_p, &version) != REDISMODULE_OK)) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
     if (version < 0 || ((ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && version == 0)) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
@@ -990,7 +1013,7 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
 
         /* Version equals 0 means no version checking */
         if (ex_flags & TAIR_HASH_SET_WITH_VER && version != 0 && version != tair_hash_val->version) {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_VERSION);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION);
             return REDISMODULE_ERR;
         }
     }
@@ -1167,17 +1190,17 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
 
     for (int i = 2; i < argc; i += 4) {
         if (RedisModule_StringToLongLong(argv[i + 3], &when) != REDISMODULE_OK) {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
             return REDISMODULE_ERR;
         }
 
         if (RedisModule_StringToLongLong(argv[i + 2], &ver) != REDISMODULE_OK) {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
             return REDISMODULE_ERR;
         }
 
         if (ver < 0 || when < 0) {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
             return REDISMODULE_ERR;
         }
 
@@ -1186,14 +1209,14 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
         if (tair_hash_val == NULL || ver == 0 || tair_hash_val->version == ver) {
             continue;
         } else {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_VERSION);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION);
             return REDISMODULE_ERR;
         }
     }
 
     for (int i = 2; i < argc; i += 4) {
         if (RedisModule_StringToLongLong(argv[i + 3], &when) != REDISMODULE_OK) {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
             return REDISMODULE_ERR;
         }
 
@@ -1291,7 +1314,7 @@ int TairHashTypeHver_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -1321,13 +1344,13 @@ int TairHashTypeHsetVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     long long version;
 
     if (RedisModule_StringToLongLong(argv[3], &version) != REDISMODULE_OK) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
     /* version must > 0 */
     if (version <= 0) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
@@ -1349,7 +1372,7 @@ int TairHashTypeHsetVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -1397,7 +1420,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     }
 
     if (RedisModule_StringToLongLong(argv[3], &incr) != REDISMODULE_OK) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_NOT_INTEGER);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_NOT_INTEGER);
         return REDISMODULE_ERR;
     }
 
@@ -1438,43 +1461,43 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
             max_p = next;
             j++;
         } else {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
             return REDISMODULE_ERR;
         }
     }
 
     if ((NULL != expire_p) && (RedisModule_StringToLongLong(expire_p, &expire) != REDISMODULE_OK)) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
     if (expire_p && expire <= 0) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
     if ((NULL != version_p) && (RedisModule_StringToLongLong(version_p, &version) != REDISMODULE_OK)) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
     if (version < 0 || ((ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && version == 0)) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
     if ((NULL != min_p) && (RedisModule_StringToLongLong(min_p, &min))) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INT_MIN_MAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INT_MIN_MAX);
         return REDISMODULE_ERR;
     }
 
     if ((NULL != max_p) && (RedisModule_StringToLongLong(max_p, &max))) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INT_MIN_MAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INT_MIN_MAX);
         return REDISMODULE_ERR;
     }
 
     if (NULL != min_p && NULL != max_p && max < min) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_MIN_MAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_MIN_MAX);
         return REDISMODULE_ERR;
     }
 
@@ -1510,13 +1533,13 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         tair_hash_val->version = 0;
     } else {
         if (RedisModule_StringToLongLong(tair_hash_val->value, &cur_val) != REDISMODULE_OK) {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_NOT_INTEGER);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_NOT_INTEGER);
             return REDISMODULE_ERR;
         }
 
         /* Version equals 0 means no version checking */
         if (ex_flags & TAIR_HASH_SET_WITH_VER && version != 0 && version != tair_hash_val->version) {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_VERSION);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION);
             return REDISMODULE_ERR;
         }
     }
@@ -1525,7 +1548,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         if (nokey) {
             tairHashValRelease(tair_hash_val);
         }
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_OVERFLOW);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_OVERFLOW);
         return REDISMODULE_ERR;
     }
 
@@ -1605,7 +1628,7 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
     }
 
     if (mstring2ld(argv[3], &incr) == REDISMODULE_ERR) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_NOT_FLOAT);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_NOT_FLOAT);
         return REDISMODULE_ERR;
     }
 
@@ -1647,43 +1670,43 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
             max_p = next;
             j++;
         } else {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
             return REDISMODULE_ERR;
         }
     }
 
     if ((NULL != expire_p) && (RedisModule_StringToLongLong(expire_p, &expire) != REDISMODULE_OK)) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
     if (expire_p && expire <= 0) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
     if ((NULL != version_p) && (RedisModule_StringToLongLong(version_p, &version) != REDISMODULE_OK)) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
     if (version < 0 || ((ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && version == 0)) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
     if ((NULL != min_p) && (mstring2ld(min_p, &min) != REDISMODULE_OK)) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_FLOAT_MIN_MAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_FLOAT_MIN_MAX);
         return REDISMODULE_ERR;
     }
 
     if ((NULL != max_p) && (mstring2ld(max_p, &max) != REDISMODULE_OK)) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_FLOAT_MIN_MAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_FLOAT_MIN_MAX);
         return REDISMODULE_ERR;
     }
 
     if (NULL != min_p && NULL != max_p && max < min) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_MIN_MAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_MIN_MAX);
         return REDISMODULE_ERR;
     }
 
@@ -1697,7 +1720,7 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -1724,13 +1747,13 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
         tair_hash_val->version = 0;
     } else {
         if (mstring2ld(tair_hash_val->value, &cur_val) != REDISMODULE_OK) {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_NOT_FLOAT);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_NOT_FLOAT);
             return REDISMODULE_ERR;
         }
 
         /* Version equals 0 means no version checking */
         if (ex_flags & TAIR_HASH_SET_WITH_VER && version != 0 && version != tair_hash_val->version) {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_VERSION);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION);
             return REDISMODULE_ERR;
         }
     }
@@ -1739,14 +1762,14 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
         if (nokey) {
             tairHashValRelease(tair_hash_val);
         }
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_OVERFLOW);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_OVERFLOW);
         return REDISMODULE_ERR;
     }
 
     if ((max_p != NULL && cur_val + incr > max) || (min_p != NULL && cur_val + incr < min)) {
         if (nokey)
             tairHashValRelease(tair_hash_val);
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_OVERFLOW);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_OVERFLOW);
         return REDISMODULE_ERR;
     }
 
@@ -1826,7 +1849,7 @@ int TairHashTypeHget_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -1873,7 +1896,7 @@ int TairHashTypeHgetWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString 
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -1925,7 +1948,7 @@ int TairHashTypeHmget_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -1981,7 +2004,7 @@ int TairHashTypeHmgetWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -2100,7 +2123,7 @@ int TairHashTypeHdelWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString 
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -2108,7 +2131,7 @@ int TairHashTypeHdelWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString 
     int dbid = RedisModule_GetSelectedDb(ctx);
     for (j = 2; j < argc; j += 2) {
         if (RedisModule_StringToLongLong(argv[j + 1], &ver) != REDISMODULE_OK) {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
             return REDISMODULE_ERR;
         }
 
@@ -2156,7 +2179,7 @@ int TairHashTypeHlen_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         if (!rsStrcasecmp(argv[2], "noexp")) {
             noexp = 1;
         } else {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
             return REDISMODULE_ERR;
         }
     }
@@ -2179,7 +2202,7 @@ int TairHashTypeHlen_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -2231,7 +2254,7 @@ int TairHashTypeHexists_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -2277,7 +2300,7 @@ int TairHashTypeHstrlen_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -2324,7 +2347,7 @@ int TairHashTypeHkeys_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -2378,7 +2401,7 @@ int TairHashTypeHvals_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -2431,7 +2454,7 @@ int TairHashTypeHgetAll_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -2496,7 +2519,7 @@ int TairHashTypeHscan_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
 
     unsigned long cursor;
     if (parseScanCursor(argv[2], &cursor) == REDISMODULE_ERR) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
         return REDISMODULE_ERR;
     }
 
@@ -2511,12 +2534,12 @@ int TairHashTypeHscan_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
             j++;
         } else if (!rsStrcasecmp(argv[j], "COUNT") && next) {
             if (RedisModule_StringToLongLong(next, &count) == REDISMODULE_ERR) {
-                RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+                RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
                 return REDISMODULE_ERR;
             }
             j++;
         } else {
-            RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_SYNTAX);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
             return REDISMODULE_ERR;
         }
     }
@@ -2535,7 +2558,7 @@ int TairHashTypeHscan_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     }
 
     if (tair_hash_obj == NULL) {
-        RedisModule_ReplyWithError(ctx, EXHASH_ERRORMSG_INTERNAL_ERR);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
         return REDISMODULE_ERR;
     }
 
@@ -3011,6 +3034,7 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
     RedisModule_SubscribeToServerEvent(ctx, RedisModuleEvent_SwapDB, swapDbCallback);
     RedisModule_SubscribeToServerEvent(ctx, RedisModuleEvent_FlushDB, flushDbCallback);
     RedisModule_SubscribeToKeyspaceEvents(ctx, REDISMODULE_NOTIFY_GENERIC, keySpaceNotification);
+    RedisModule_RegisterInfoFunc(ctx, infoFunc);
 
     return REDISMODULE_OK;
 }

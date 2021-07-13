@@ -881,16 +881,16 @@ void infoFunc(RedisModuleInfoCtx *ctx, int for_crash_report) {
     RedisModule_InfoAddFieldLongLong(ctx, "active_expire_avg_time_msec", stat_avg_active_expire_time_msec);
     RedisModule_InfoAddFieldLongLong(ctx, "passive_expire_keys_per_loop", tair_hash_passive_expire_keys_per_loop);
     RedisModule_InfoAddFieldLongLong(ctx, "passive_expire_keys_per_loop", tair_hash_passive_expire_keys_per_loop);
- 
+
     RedisModule_InfoAddSection(ctx, "ActiveExpiredFields");
     int i;
     char buf[10];
     for (i = 0; i < DB_NUM; ++i) {
         if (g_expire_index[i]->length == 0 && stat_expired_field[i] == 0) {
             continue;
-        }        
-        snprintf(buf,sizeof(buf), "db%d", i);
-        RedisModule_InfoAddFieldLongLong(ctx, buf, stat_expired_field[i]);  
+        }
+        snprintf(buf, sizeof(buf), "db%d", i);
+        RedisModule_InfoAddFieldLongLong(ctx, buf, stat_expired_field[i]);
     }
 }
 
@@ -2922,32 +2922,35 @@ int Module_CreateCommands(RedisModuleCtx *ctx) {
 #define CREATE_WRCMD(name, tgt) CREATE_CMD(name, tgt, "write deny-oom")
 #define CREATE_ROCMD(name, tgt) CREATE_CMD(name, tgt, "readonly fast")
 
+    /* write cmds */
     CREATE_WRCMD("exhset", TairHashTypeHset_RedisCommand)
-    CREATE_ROCMD("exhget", TairHashTypeHget_RedisCommand)
     CREATE_WRCMD("exhdel", TairHashTypeHdel_RedisCommand)
     CREATE_WRCMD("exhdelwithver", TairHashTypeHdelWithVer_RedisCommand)
+    CREATE_WRCMD("exhincrby", TairHashTypeHincrBy_RedisCommand)
+    CREATE_WRCMD("exhincrbyfloat", TairHashTypeHincrByFloat_RedisCommand)
+    CREATE_WRCMD("exhsetnx", TairHashTypeHsetNx_RedisCommand)
+    CREATE_WRCMD("exhmset", TairHashTypeHmset_RedisCommand)
+    CREATE_WRCMD("exhmsetwithopts", TairHashTypeHmsetWithOpts_RedisCommand)
+    CREATE_WRCMD("exhsetver", TairHashTypeHsetVer_RedisCommand)
+    CREATE_WRCMD("exhexpire", TairHashTypeHexpire_RedisCommand)
+    CREATE_WRCMD("exhexpireat", TairHashTypeHexpireAt_RedisCommand)
+    CREATE_WRCMD("exhpexpire", TairHashTypeHpexpire_RedisCommand)
+    CREATE_WRCMD("exhpexpireat", TairHashTypeHpexpireAt_RedisCommand)
+
+    /* readonly cmds */
+    CREATE_ROCMD("exhget", TairHashTypeHget_RedisCommand)
     CREATE_ROCMD("exhlen", TairHashTypeHlen_RedisCommand)
     CREATE_ROCMD("exhexists", TairHashTypeHexists_RedisCommand)
     CREATE_ROCMD("exhstrlen", TairHashTypeHstrlen_RedisCommand)
-    CREATE_WRCMD("exhincrby", TairHashTypeHincrBy_RedisCommand)
-    CREATE_WRCMD("exhincrbyfloat", TairHashTypeHincrByFloat_RedisCommand)
     CREATE_ROCMD("exhkeys", TairHashTypeHkeys_RedisCommand)
     CREATE_ROCMD("exhvals", TairHashTypeHvals_RedisCommand)
     CREATE_ROCMD("exhgetall", TairHashTypeHgetAll_RedisCommand)
     CREATE_ROCMD("exhmget", TairHashTypeHmget_RedisCommand)
     CREATE_ROCMD("exhmgetwithver", TairHashTypeHmgetWithVer_RedisCommand)
     CREATE_ROCMD("exhscan", TairHashTypeHscan_RedisCommand)
-    CREATE_WRCMD("exhsetnx", TairHashTypeHsetNx_RedisCommand)
-    CREATE_WRCMD("exhmset", TairHashTypeHmset_RedisCommand)
-    CREATE_WRCMD("exhmsetwithopts", TairHashTypeHmsetWithOpts_RedisCommand)
     CREATE_ROCMD("exhver", TairHashTypeHver_RedisCommand)
     CREATE_ROCMD("exhttl", TairHashTypeHttl_RedisCommand)
     CREATE_ROCMD("exhpttl", TairHashTypeHpttl_RedisCommand)
-    CREATE_WRCMD("exhsetver", TairHashTypeHsetVer_RedisCommand)
-    CREATE_WRCMD("exhexpire", TairHashTypeHexpire_RedisCommand)
-    CREATE_WRCMD("exhexpireat", TairHashTypeHexpireAt_RedisCommand)
-    CREATE_WRCMD("exhpexpire", TairHashTypeHpexpire_RedisCommand)
-    CREATE_WRCMD("exhpexpireat", TairHashTypeHpexpireAt_RedisCommand)
     CREATE_ROCMD("exhgetwithver", TairHashTypeHgetWithVer_RedisCommand)
     CREATE_ROCMD("exhexpireinfo", TairHashTypeActiveExpireInfo_RedisCommand)
 

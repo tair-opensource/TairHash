@@ -139,7 +139,7 @@ typedef struct TairHashVal {
     RedisModuleString *value;
 } TairHashVal;
 
-static struct TairHashVal *createExhashVal(void) {
+static struct TairHashVal *createTairHashVal(void) {
     struct TairHashVal *o;
     o = RedisModule_Calloc(1, sizeof(*o));
     return o;
@@ -280,7 +280,7 @@ inline static int expireTairHashObjIfNeeded(RedisModuleCtx *ctx, RedisModuleStri
     return 1;
 }
 
-int delEmptyExhashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *raw_key, tairHashObj *obj) {
+int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *raw_key, tairHashObj *obj) {
     if (!obj || (RedisModule_GetContextFlags(ctx) & REDISMODULE_CTX_FLAGS_SLAVE) || (dictSize(obj->hash) != 0)) {
         return 0;
     }
@@ -401,7 +401,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
 
             if (start_index) {
                 m_zslDeleteRangeByRank(tair_hash_obj->expire_index, 1, start_index);
-                delEmptyExhashIfNeeded(ctx, real_key, key, tair_hash_obj);
+                delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj);
             }
 
             /* If there is still a field waiting to expire and delete, re-insert it to the global index. */
@@ -654,7 +654,7 @@ inline static void latencySensitivePassiveExpire(RedisModuleCtx *ctx, unsigned i
 
         if (start_index) {
             m_zslDeleteRangeByRank(tair_hash_obj->expire_index, 1, start_index);
-            delEmptyExhashIfNeeded(ctx, real_key, key, tair_hash_obj);
+            delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj);
         }
 
         if (ln) {
@@ -684,7 +684,7 @@ static int mstrmatchlen(RedisModuleString *pattern, RedisModuleString *str, int 
     return m_stringmatchlen(pattern_p, plen, str_p, slen, nocase);
 }
 
-int exhashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int argc, long long basetime, int unit) {
+int tairHashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int argc, long long basetime, int unit) {
     RedisModule_AutoMemory(ctx);
     int j;
 
@@ -793,11 +793,11 @@ int exhashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int a
     }
 
     RedisModule_ReplicateVerbatim(ctx);
-    delEmptyExhashIfNeeded(ctx, key, pkey, tair_hash_obj);
+    delEmptyTairHashIfNeeded(ctx, key, pkey, tair_hash_obj);
     return REDISMODULE_OK;
 }
 
-int exhashTTLGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int argc, int unit) {
+int tairHashTTLGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int argc, int unit) {
     RedisModule_AutoMemory(ctx);
 
     if (argc != 3) {
@@ -854,7 +854,7 @@ int exhashTTLGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int argc
         }
     }
 
-    delEmptyExhashIfNeeded(ctx, key, pkey, tair_hash_obj);
+    delEmptyTairHashIfNeeded(ctx, key, pkey, tair_hash_obj);
     return REDISMODULE_OK;
 }
 
@@ -894,7 +894,7 @@ void infoFunc(RedisModuleInfoCtx *ctx, int for_crash_report) {
     }
 }
 
-/* ========================= "exhash" type commands ======================= */
+/* ========================= "tairhash" type commands ======================= */
 
 /* EXHSET <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [NX|XX] [VER version | ABS version] */
 int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
@@ -1000,7 +1000,7 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
             return REDISMODULE_ERR;
         }
         nokey = 1;
-        tair_hash_val = createExhashVal();
+        tair_hash_val = createTairHashVal();
         tair_hash_val->version = 0;
         tair_hash_val->expire = 0;
         tair_hash_val->value = NULL;
@@ -1091,7 +1091,7 @@ int TairHashTypeHsetNx_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **arg
 
     TairHashVal *tair_hash_val = (TairHashVal *)m_dictFetchValue(tair_hash_obj->hash, skey);
     if (tair_hash_val == NULL) {
-        tair_hash_val = createExhashVal();
+        tair_hash_val = createTairHashVal();
         tair_hash_val->expire = 0;
     } else {
         RedisModule_ReplyWithLongLong(ctx, 0);
@@ -1138,7 +1138,7 @@ int TairHashTypeHmset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
         TairHashVal *tair_hash_val = (TairHashVal *)m_dictFetchValue(tair_hash_obj->hash, argv[i]);
         if (tair_hash_val == NULL) {
             nokey = 1;
-            tair_hash_val = createExhashVal();
+            tair_hash_val = createTairHashVal();
             tair_hash_val->expire = 0;
         } else {
             if (tair_hash_val->value) {
@@ -1157,7 +1157,7 @@ int TairHashTypeHmset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     return REDISMODULE_OK;
 }
 
-/* EXHMSETWITHOPTS exhashkey field1 val1 ver1 expire1 [field2 val2 ver2 expire2 ...] */
+/* EXHMSETWITHOPTS tairHashkey field1 val1 ver1 expire1 [field2 val2 ver2 expire2 ...] */
 int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     RedisModule_AutoMemory(ctx);
 
@@ -1222,7 +1222,7 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
 
         TairHashVal *tair_hash_val = (TairHashVal *)m_dictFetchValue(tair_hash_obj->hash, argv[i]);
         if (tair_hash_val == NULL) {
-            tair_hash_val = createExhashVal();
+            tair_hash_val = createTairHashVal();
             tair_hash_val->expire = 0;
             tair_hash_val->version = 0;
             tair_hash_val->value = NULL;
@@ -1260,32 +1260,32 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
 
 /*  EXHPEXPIREAT <key> <field> <milliseconds-timestamp> [ VER version | ABS version ]*/
 int TairHashTypeHpexpireAt_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    return exhashExpireGenericFunc(ctx, argv, argc, 0, UNIT_MILLISECONDS);
+    return tairHashExpireGenericFunc(ctx, argv, argc, 0, UNIT_MILLISECONDS);
 }
 
 /*  EXHPEXPIRE <key> <field> <milliseconds> [ VER version | ABS version ]*/
 int TairHashTypeHpexpire_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    return exhashExpireGenericFunc(ctx, argv, argc, RedisModule_Milliseconds(), UNIT_MILLISECONDS);
+    return tairHashExpireGenericFunc(ctx, argv, argc, RedisModule_Milliseconds(), UNIT_MILLISECONDS);
 }
 
 /*  EXHEXPIREAT <key> <field> <timestamp> [ VER version | ABS version ] */
 int TairHashTypeHexpireAt_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    return exhashExpireGenericFunc(ctx, argv, argc, 0, UNIT_SECONDS);
+    return tairHashExpireGenericFunc(ctx, argv, argc, 0, UNIT_SECONDS);
 }
 
 /*  EXHEXPIRE <key> <field> <seconds> [ VER version | ABS version ] */
 int TairHashTypeHexpire_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    return exhashExpireGenericFunc(ctx, argv, argc, RedisModule_Milliseconds(), UNIT_SECONDS);
+    return tairHashExpireGenericFunc(ctx, argv, argc, RedisModule_Milliseconds(), UNIT_SECONDS);
 }
 
 /*  EXHPTTL <key> <field> */
 int TairHashTypeHpttl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    return exhashTTLGenericFunc(ctx, argv, argc, UNIT_MILLISECONDS);
+    return tairHashTTLGenericFunc(ctx, argv, argc, UNIT_MILLISECONDS);
 }
 
 /*  EXHTTL <key> <field> */
 int TairHashTypeHttl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    return exhashTTLGenericFunc(ctx, argv, argc, UNIT_SECONDS);
+    return tairHashTTLGenericFunc(ctx, argv, argc, UNIT_SECONDS);
 }
 
 /*  EXHVER <key> <field> */
@@ -1329,7 +1329,7 @@ int TairHashTypeHver_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         RedisModule_ReplyWithLongLong(ctx, tair_hash_val->version);
     }
 
-    delEmptyExhashIfNeeded(ctx, key, argv[1], tair_hash_obj);
+    delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
     return REDISMODULE_OK;
 }
 
@@ -1383,7 +1383,7 @@ int TairHashTypeHsetVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     }
 
     if (expireTairHashObjIfNeeded(ctx, argv[1], tair_hash_obj, argv[2], 0)) {
-        delEmptyExhashIfNeeded(ctx, key, argv[1], tair_hash_obj);
+        delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
         RedisModule_ReplyWithLongLong(ctx, 0);
         return REDISMODULE_OK;
     }
@@ -1517,7 +1517,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     m_dictEntry *de = m_dictFind(tair_hash_obj->hash, skey);
     if (de == NULL) {
         nokey = 1;
-        tair_hash_val = createExhashVal();
+        tair_hash_val = createTairHashVal();
         tair_hash_val->expire = 0;
         tair_hash_val->version = 0;
     } else {
@@ -1731,7 +1731,7 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
     TairHashVal *tair_hash_val = NULL;
     if (de == NULL) {
         nokey = 1;
-        tair_hash_val = createExhashVal();
+        tair_hash_val = createTairHashVal();
         tair_hash_val->expire = 0;
         tair_hash_val->version = 0;
     } else {
@@ -1867,7 +1867,7 @@ int TairHashTypeHget_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         RedisModule_ReplyWithString(ctx, tair_hash_val->value);
     }
 
-    delEmptyExhashIfNeeded(ctx, key, pkey, tair_hash_obj);
+    delEmptyTairHashIfNeeded(ctx, key, pkey, tair_hash_obj);
     return REDISMODULE_OK;
 }
 
@@ -1914,7 +1914,7 @@ int TairHashTypeHgetWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString 
         RedisModule_ReplyWithString(ctx, tair_hash_val->value);
         RedisModule_ReplyWithLongLong(ctx, tair_hash_val->version);
     }
-    delEmptyExhashIfNeeded(ctx, key, argv[1], tair_hash_obj);
+    delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
     return REDISMODULE_OK;
 }
 
@@ -1971,7 +1971,7 @@ int TairHashTypeHmget_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
         }
     }
     RedisModule_ReplySetArrayLength(ctx, cn);
-    delEmptyExhashIfNeeded(ctx, key, argv[1], tair_hash_obj);
+    delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
     return REDISMODULE_OK;
 }
 
@@ -2029,7 +2029,7 @@ int TairHashTypeHmgetWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
         }
     }
     RedisModule_ReplySetArrayLength(ctx, cn);
-    delEmptyExhashIfNeeded(ctx, key, argv[1], tair_hash_obj);
+    delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
 
     return REDISMODULE_OK;
 }
@@ -2088,7 +2088,7 @@ int TairHashTypeHdel_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         }
     }
 
-    delEmptyExhashIfNeeded(ctx, key, argv[1], tair_hash_obj);
+    delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
     RedisModule_ReplyWithLongLong(ctx, deleted);
     return REDISMODULE_OK;
 }
@@ -2160,7 +2160,7 @@ int TairHashTypeHdelWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString 
         }
     }
 
-    delEmptyExhashIfNeeded(ctx, key, argv[1], tair_hash_obj);
+    delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
     RedisModule_ReplyWithLongLong(ctx, deleted);
     return REDISMODULE_OK;
 }
@@ -2263,14 +2263,14 @@ int TairHashTypeHexists_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         field_expired = 1;
     }
 
-    TairHashVal *exhashval = m_dictFetchValue(tair_hash_obj->hash, argv[2]);
-    if (field_expired || exhashval == NULL) {
+    TairHashVal *tairHashval = m_dictFetchValue(tair_hash_obj->hash, argv[2]);
+    if (field_expired || tairHashval == NULL) {
         RedisModule_ReplyWithLongLong(ctx, 0);
     } else {
         RedisModule_ReplyWithLongLong(ctx, 1);
     }
 
-    delEmptyExhashIfNeeded(ctx, key, argv[1], tair_hash_obj);
+    delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
     return REDISMODULE_OK;
 }
 
@@ -2316,7 +2316,7 @@ int TairHashTypeHstrlen_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         RedisModule_StringPtrLen(val->value, &len);
         RedisModule_ReplyWithLongLong(ctx, len);
     }
-    delEmptyExhashIfNeeded(ctx, key, argv[1], tair_hash_obj);
+    delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
 
     return REDISMODULE_OK;
 }
@@ -2617,7 +2617,7 @@ int TairHashTypeHscan_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
 
     m_listRelease(keys);
 
-    delEmptyExhashIfNeeded(ctx, key, argv[1], tair_hash_obj);
+    delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
 
     return REDISMODULE_OK;
 }
@@ -2704,7 +2704,7 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
             /* For field that has expired, we do not load it into DB */
             continue;
         }
-        TairHashVal *hashv = createExhashVal();
+        TairHashVal *hashv = createTairHashVal();
         hashv->version = version;
         hashv->expire = expire;
         hashv->value = takeAndRef(value);
@@ -2862,7 +2862,7 @@ void *TairHashTypeCopy(RedisModuleKeyOptCtx *ctx, const void *value) {
     while ((de = m_dictNext(di)) != NULL) {
         field = RedisModule_CreateStringFromString(NULL, (RedisModuleString *)dictGetKey(de));
         TairHashVal *oldval = (TairHashVal *)dictGetVal(de);
-        TairHashVal *newval = createExhashVal();
+        TairHashVal *newval = createTairHashVal();
         newval->expire = oldval->expire;
         newval->version = oldval->version;
         newval->value = RedisModule_CreateStringFromString(NULL, oldval->value);

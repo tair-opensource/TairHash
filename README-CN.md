@@ -89,4 +89,5 @@ cmake ../ && make -j
 
 <br/>
 
-注意，该module只适用于redis最新的unstable分支 
+## 适用redis版本  
+由于TairHash依赖`unlink2`回调函数同步释放索引结构，因此需要确保你的Redis中REDISMODULE_TYPE_METHOD_VERSION不低于4。

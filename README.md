@@ -86,5 +86,5 @@ then the tairhash_module.so library file will be generated in the lib directory
 [Reference](CMDDOC.md)
 
 
-<br/>
-Note that this module can only be used on the latest unstable branch of redis
+## Applicable Redis version   
+Since TairHash relies on the `unlink2` callback function to release the index structure synchronously, you need to make sure that REDISMODULE_TYPE_METHOD_VERSION in your Redis is not less than 4.

@@ -284,6 +284,7 @@ int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModu
     if (!obj || (RedisModule_GetContextFlags(ctx) & REDISMODULE_CTX_FLAGS_SLAVE) || (dictSize(obj->hash) != 0)) {
         return 0;
     }
+
     RedisModule_DeleteKey(key);
     RedisModule_Replicate(ctx, "DEL", "s", raw_key);
     return 1;
@@ -667,7 +668,7 @@ inline static void latencySensitivePassiveExpire(RedisModuleCtx *ctx, unsigned i
     m_listRelease(keys);
 }
 
-static int rsStrcasecmp(const RedisModuleString *rs1, const char *s2) {
+static int mstrcasecmp(const RedisModuleString *rs1, const char *s2) {
     size_t n1 = strlen(s2);
     size_t n2;
     const char *s1 = RedisModule_StringPtrLen(rs1, &n2);
@@ -710,11 +711,11 @@ int tairHashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
     if (argc > 4) {
         for (j = 4; j < argc; j++) {
             RedisModuleString *next = (j == argc - 1) ? NULL : argv[j + 1];
-            if (!rsStrcasecmp(argv[4], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
+            if (!mstrcasecmp(argv[4], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
                 ex_flags |= TAIR_HASH_SET_WITH_VER;
                 version_p = next;
                 j++;
-            } else if (!rsStrcasecmp(argv[4], "abs") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && next) {
+            } else if (!mstrcasecmp(argv[4], "abs") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && next) {
                 ex_flags |= TAIR_HASH_SET_WITH_ABS_VER;
                 version_p = next;
                 j++;
@@ -786,13 +787,28 @@ int tairHashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
         }
 
         RedisModule_ReplyWithLongLong(ctx, 1);
+
+        if (ex_flags & TAIR_HASH_SET_WITH_ABS_VER) {
+            tair_hash_val->version = version;
+        }
+
+        size_t vlen = 0, VSIZE_MAX = 10;
+        RedisModuleString **v = NULL;
+        v = RedisModule_Realloc(v, sizeof(RedisModuleString *) * VSIZE_MAX);
+        v[vlen] = RedisModule_CreateStringFromString(ctx, argv[1]);
+        v[vlen + 1] = RedisModule_CreateStringFromString(ctx, argv[2]);
+        v[vlen + 2] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->expire);
+        vlen += 3;
+        if (version_p) {
+            v[vlen] = RedisModule_CreateString(ctx, "ABS", 3);
+            v[vlen + 1] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->version);
+            vlen += 2;
+        }
+
+        RedisModule_Replicate(ctx, "EXHPEXPIREAT", "v", v, vlen);
+        RedisModule_Free(v);
     }
 
-    if (ex_flags & TAIR_HASH_SET_WITH_ABS_VER) {
-        tair_hash_val->version = version;
-    }
-
-    RedisModule_ReplicateVerbatim(ctx);
     delEmptyTairHashIfNeeded(ctx, key, pkey, tair_hash_obj);
     return REDISMODULE_OK;
 }
@@ -921,33 +937,33 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
 
     for (j = 4; j < argc; j++) {
         RedisModuleString *next = (j == argc - 1) ? NULL : argv[j + 1];
-        if (!rsStrcasecmp(argv[j], "nx") && !(ex_flags & TAIR_HASH_SET_XX)) {
+        if (!mstrcasecmp(argv[j], "nx") && !(ex_flags & TAIR_HASH_SET_XX)) {
             ex_flags |= TAIR_HASH_SET_NX;
-        } else if (!rsStrcasecmp(argv[j], "xx") && !(ex_flags & TAIR_HASH_SET_NX)) {
+        } else if (!mstrcasecmp(argv[j], "xx") && !(ex_flags & TAIR_HASH_SET_NX)) {
             ex_flags |= TAIR_HASH_SET_XX;
-        } else if (!rsStrcasecmp(argv[j], "ex") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
+        } else if (!mstrcasecmp(argv[j], "ex") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
             ex_flags |= TAIR_HASH_SET_EX;
             expire_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "exat") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
+        } else if (!mstrcasecmp(argv[j], "exat") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
             ex_flags |= TAIR_HASH_SET_EX;
             ex_flags |= TAIR_HASH_SET_ABS_EXPIRE;
             expire_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "px") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
+        } else if (!mstrcasecmp(argv[j], "px") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
             ex_flags |= TAIR_HASH_SET_PX;
             expire_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "pxat") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
+        } else if (!mstrcasecmp(argv[j], "pxat") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
             ex_flags |= TAIR_HASH_SET_PX;
             ex_flags |= TAIR_HASH_SET_ABS_EXPIRE;
             expire_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_VER;
             version_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "abs") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "abs") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_ABS_VER;
             version_p = next;
             j++;
@@ -1057,7 +1073,25 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         RedisModule_ReplyWithLongLong(ctx, 0);
     }
 
-    RedisModule_ReplicateVerbatim(ctx);
+    size_t vlen = 0, VSIZE_MAX = 10;
+    RedisModuleString **v = NULL;
+    v = RedisModule_Realloc(v, sizeof(RedisModuleString *) * VSIZE_MAX);
+    v[vlen] = RedisModule_CreateStringFromString(ctx, argv[1]);
+    v[vlen + 1] = RedisModule_CreateStringFromString(ctx, argv[2]);
+    v[vlen + 2] = RedisModule_CreateStringFromString(ctx, tair_hash_val->value);
+    vlen += 3;
+    if (version_p) {
+        v[vlen] = RedisModule_CreateString(ctx, "ABS", 3);
+        v[vlen + 1] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->version);
+        vlen += 2;
+    }
+    if (expire_p) {
+        v[vlen] = RedisModule_CreateString(ctx, "PXAT", 4);
+        v[vlen + 1] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->expire);
+        vlen += 2;
+    }
+    RedisModule_Replicate(ctx, "EXHSET", "v", v, vlen);
+    RedisModule_Free(v);
     return REDISMODULE_OK;
 }
 
@@ -1157,6 +1191,7 @@ int TairHashTypeHmset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     return REDISMODULE_OK;
 }
 
+/* Deprecated */
 /* EXHMSETWITHOPTS tairHashkey field1 val1 ver1 expire1 [field2 val2 ver2 expire2 ...] */
 int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     RedisModule_AutoMemory(ctx);
@@ -1426,37 +1461,37 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
 
     for (j = 4; j < argc; j++) {
         RedisModuleString *next = (j == argc - 1) ? NULL : argv[j + 1];
-        if (!rsStrcasecmp(argv[j], "ex") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
+        if (!mstrcasecmp(argv[j], "ex") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
             ex_flags |= TAIR_HASH_SET_EX;
             expire_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "exat") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
+        } else if (!mstrcasecmp(argv[j], "exat") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
             ex_flags |= TAIR_HASH_SET_EX;
             ex_flags |= TAIR_HASH_SET_ABS_EXPIRE;
             expire_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "px") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
+        } else if (!mstrcasecmp(argv[j], "px") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
             ex_flags |= TAIR_HASH_SET_PX;
             expire_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "pxat") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
+        } else if (!mstrcasecmp(argv[j], "pxat") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
             ex_flags |= TAIR_HASH_SET_PX;
             ex_flags |= TAIR_HASH_SET_ABS_EXPIRE;
             expire_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_VER;
             version_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "abs") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "abs") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_ABS_VER;
             version_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "min") && next) {
+        } else if (!mstrcasecmp(argv[j], "min") && next) {
             ex_flags |= TAIR_HASH_SET_WITH_BOUNDARY;
             min_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "max") && next) {
+        } else if (!mstrcasecmp(argv[j], "max") && next) {
             ex_flags |= TAIR_HASH_SET_WITH_BOUNDARY;
             max_p = next;
             j++;
@@ -1635,37 +1670,37 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
     for (j = 4; j < argc; j++) {
         RedisModuleString *next = (j == argc - 1) ? NULL : argv[j + 1];
 
-        if (!rsStrcasecmp(argv[j], "ex") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
+        if (!mstrcasecmp(argv[j], "ex") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
             ex_flags |= TAIR_HASH_SET_EX;
             expire_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "exat") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
+        } else if (!mstrcasecmp(argv[j], "exat") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
             ex_flags |= TAIR_HASH_SET_EX;
             ex_flags |= TAIR_HASH_SET_ABS_EXPIRE;
             expire_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "px") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
+        } else if (!mstrcasecmp(argv[j], "px") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
             ex_flags |= TAIR_HASH_SET_PX;
             expire_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "pxat") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
+        } else if (!mstrcasecmp(argv[j], "pxat") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && next) {
             ex_flags |= TAIR_HASH_SET_PX;
             ex_flags |= TAIR_HASH_SET_ABS_EXPIRE;
             expire_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_VER;
             version_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "abs") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "abs") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_ABS_VER;
             version_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "min") && next) {
+        } else if (!mstrcasecmp(argv[j], "min") && next) {
             ex_flags |= TAIR_HASH_SET_WITH_BOUNDARY;
             min_p = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "max") && next) {
+        } else if (!mstrcasecmp(argv[j], "max") && next) {
             ex_flags |= TAIR_HASH_SET_WITH_BOUNDARY;
             max_p = next;
             j++;
@@ -2176,7 +2211,7 @@ int TairHashTypeHlen_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
     }
 
     if (argc == 3) {
-        if (!rsStrcasecmp(argv[2], "noexp")) {
+        if (!mstrcasecmp(argv[2], "noexp")) {
             noexp = 1;
         } else {
             RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
@@ -2529,10 +2564,10 @@ int TairHashTypeHscan_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     long long count = TAIR_HASH_SCAN_DEFAULT_COUNT;
     for (j = 3; j < argc; j++) {
         RedisModuleString *next = (j == argc - 1) ? NULL : argv[j + 1];
-        if (!rsStrcasecmp(argv[j], "MATCH") && next) {
+        if (!mstrcasecmp(argv[j], "MATCH") && next) {
             pattern = next;
             j++;
-        } else if (!rsStrcasecmp(argv[j], "COUNT") && next) {
+        } else if (!mstrcasecmp(argv[j], "COUNT") && next) {
             if (RedisModule_StringToLongLong(next, &count) == REDISMODULE_ERR) {
                 RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
                 return REDISMODULE_ERR;
@@ -2970,28 +3005,28 @@ int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) 
     }
 
     for (int ii = 0; ii < argc; ii += 2) {
-        if (!rsStrcasecmp(argv[ii], "enable_active_expire")) {
+        if (!mstrcasecmp(argv[ii], "enable_active_expire")) {
             long long v;
             if (RedisModule_StringToLongLong(argv[ii + 1], &v) == REDISMODULE_ERR) {
                 RedisModule_Log(ctx, "warning", "Invalid argument for enable_active_expire");
                 return REDISMODULE_ERR;
             }
             enable_active_expire = v;
-        } else if (!rsStrcasecmp(argv[ii], "active_expire_period")) {
+        } else if (!mstrcasecmp(argv[ii], "active_expire_period")) {
             long long v;
             if (RedisModule_StringToLongLong(argv[ii + 1], &v) == REDISMODULE_ERR) {
                 RedisModule_Log(ctx, "warning", "Invalid argument for active_expire_period");
                 return REDISMODULE_ERR;
             }
             tair_hash_active_expire_period = v;
-        } else if (!rsStrcasecmp(argv[ii], "active_expire_keys_per_loop")) {
+        } else if (!mstrcasecmp(argv[ii], "active_expire_keys_per_loop")) {
             long long v;
             if (RedisModule_StringToLongLong(argv[ii + 1], &v) == REDISMODULE_ERR) {
                 RedisModule_Log(ctx, "warning", "Invalid argument for active_expire_keys_per_loop");
                 return REDISMODULE_ERR;
             }
             tair_hash_active_expire_keys_per_loop = v;
-        } else if (!rsStrcasecmp(argv[ii], "active_expire_dbs_per_loop")) {
+        } else if (!mstrcasecmp(argv[ii], "active_expire_dbs_per_loop")) {
             long long v;
             if (RedisModule_StringToLongLong(argv[ii + 1], &v) == REDISMODULE_ERR) {
                 RedisModule_Log(ctx, "warning", "Invalid argument for active_expire_dbs_per_loop");

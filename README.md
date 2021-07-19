@@ -12,10 +12,11 @@
 ### The principle of efficient expiration:
 ![avatar](imgs/tairhash_index.png)
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
-- The first-level uses the smallest ttl in the second-level sorting index for sorting, so the main key is globally ordered
+- The first-level uses the smallest ttl in the second-level for sorting, so the main key is globally ordered
 - The built-in timer will periodically scan the first-level index to find out a key that has expired, and then check the secondary index of these keys to eliminate the expired fields. This is the active expire
 - Every time a write operation to tairhash, the first level index will be checked first, and at most three fields will be expired, Note these fields may not belong to the key currently being operated, so in theory, the faster you write, the faster the elimination
 - Every time you read or write a field, it will also trigger the expiration of the field itself
+- All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
 <br/>
 

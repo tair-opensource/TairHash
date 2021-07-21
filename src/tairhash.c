@@ -1990,13 +1990,12 @@ int TairHashTypeHmget_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
         return REDISMODULE_ERR;
     }
 
-    int cn = 0, field_expired = 0;
+    int cn = 0;
     RedisModule_ReplyWithArray(ctx, REDISMODULE_POSTPONED_ARRAY_LEN);
     for (int ii = 2; ii < argc; ++ii) {
         if (expireTairHashObjIfNeeded(ctx, argv[1], tair_hash_obj, argv[ii], 0)) {
             RedisModule_ReplyWithNull(ctx);
             ++cn;
-            field_expired = 1;
             continue;
         }
         TairHashVal *tair_hash_val = (TairHashVal *)m_dictFetchValue(tair_hash_obj->hash, argv[ii]);
@@ -2046,13 +2045,12 @@ int TairHashTypeHmgetWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
         return REDISMODULE_ERR;
     }
 
-    int cn = 0, field_expired = 0;
+    int cn = 0;
     RedisModule_ReplyWithArray(ctx, REDISMODULE_POSTPONED_ARRAY_LEN);
     for (int ii = 2; ii < argc; ++ii) {
         if (expireTairHashObjIfNeeded(ctx, argv[1], tair_hash_obj, argv[ii], 0)) {
             RedisModule_ReplyWithNull(ctx);
             ++cn;
-            field_expired = 1;
             continue;
         }
         TairHashVal *tair_hash_val = (TairHashVal *)m_dictFetchValue(tair_hash_obj->hash, argv[ii]);
@@ -2683,8 +2681,8 @@ int TairHashTypeActiveExpireInfo_RedisCommand(RedisModuleCtx *ctx, RedisModuleSt
         "tair_hash_active_expire_avg_time_msec:%lld\r\n"
         "tair_hash_passive_expire_keys_per_loop:%lld\r\n",
         enable_active_expire, tair_hash_active_expire_period, tair_hash_active_expire_keys_per_loop,
-        tair_hash_active_expire_dbs_per_loop, stat_last_active_expire_time_msec, stat_max_active_expire_time_msec,
-        stat_avg_active_expire_time_msec, (long long)tair_hash_passive_expire_keys_per_loop);
+        tair_hash_active_expire_dbs_per_loop, (long long)stat_last_active_expire_time_msec, (long long)stat_max_active_expire_time_msec,
+        (long long)stat_avg_active_expire_time_msec, (long long)tair_hash_passive_expire_keys_per_loop);
 
     size_t a_len, d_len, t_size = 0;
     const char *a_buf = RedisModule_StringPtrLen(info_a, &a_len);

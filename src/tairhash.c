@@ -792,17 +792,14 @@ int tairHashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
             tair_hash_val->version = version;
         }
 
-        size_t vlen = 0, VSIZE_MAX = 10;
-        RedisModuleString **v = NULL;
-        v = RedisModule_Realloc(v, sizeof(RedisModuleString *) * VSIZE_MAX);
-        v[vlen] = RedisModule_CreateStringFromString(ctx, argv[1]);
-        v[vlen + 1] = RedisModule_CreateStringFromString(ctx, argv[2]);
-        v[vlen + 2] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->expire);
-        vlen += 3;
+        size_t vlen = 0, VSIZE_MAX = 5;
+        RedisModuleString **v = RedisModule_Alloc(sizeof(RedisModuleString *) * VSIZE_MAX);
+        v[vlen++] = RedisModule_CreateStringFromString(ctx, argv[1]);
+        v[vlen++] = RedisModule_CreateStringFromString(ctx, argv[2]);
+        v[vlen++] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->expire);
         if (version_p) {
-            v[vlen] = RedisModule_CreateString(ctx, "ABS", 3);
-            v[vlen + 1] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->version);
-            vlen += 2;
+            v[vlen++] = RedisModule_CreateString(ctx, "ABS", 3);
+            v[vlen++] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->version);
         }
 
         RedisModule_Replicate(ctx, "EXHPEXPIREAT", "v", v, vlen);
@@ -834,9 +831,6 @@ int tairHashTTLGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int ar
         RedisModule_ReplyWithLongLong(ctx, -2);
         return REDISMODULE_OK;
     } else {
-        if (RedisModule_ModuleTypeGetType(key) != TairHashType) {
-            return RedisModule_ReplyWithError(ctx, REDISMODULE_ERRORMSG_WRONGTYPE);
-        }
         tair_hash_obj = RedisModule_ModuleTypeGetValue(key);
     }
 
@@ -1073,22 +1067,18 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         RedisModule_ReplyWithLongLong(ctx, 0);
     }
 
-    size_t vlen = 0, VSIZE_MAX = 10;
-    RedisModuleString **v = NULL;
-    v = RedisModule_Realloc(v, sizeof(RedisModuleString *) * VSIZE_MAX);
-    v[vlen] = RedisModule_CreateStringFromString(ctx, argv[1]);
-    v[vlen + 1] = RedisModule_CreateStringFromString(ctx, argv[2]);
-    v[vlen + 2] = RedisModule_CreateStringFromString(ctx, tair_hash_val->value);
-    vlen += 3;
+    size_t vlen = 0, VSIZE_MAX = 7;
+    RedisModuleString **v = RedisModule_Alloc(sizeof(RedisModuleString *) * VSIZE_MAX);
+    v[vlen++] = RedisModule_CreateStringFromString(ctx, argv[1]);
+    v[vlen++] = RedisModule_CreateStringFromString(ctx, argv[2]);
+    v[vlen++] = RedisModule_CreateStringFromString(ctx, tair_hash_val->value);
     if (version_p) {
-        v[vlen] = RedisModule_CreateString(ctx, "ABS", 3);
-        v[vlen + 1] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->version);
-        vlen += 2;
+        v[vlen++] = RedisModule_CreateString(ctx, "ABS", 3);
+        v[vlen++] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->version);
     }
     if (expire_p) {
-        v[vlen] = RedisModule_CreateString(ctx, "PXAT", 4);
-        v[vlen + 1] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->expire);
-        vlen += 2;
+        v[vlen++] = RedisModule_CreateString(ctx, "PXAT", 4);
+        v[vlen++] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->expire);
     }
     RedisModule_Replicate(ctx, "EXHSET", "v", v, vlen);
     RedisModule_Free(v);
@@ -1249,6 +1239,9 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
         }
     }
 
+    size_t vlen = 0;
+    RedisModuleString **v = RedisModule_Alloc(sizeof(RedisModuleString *) * 7);
+
     for (int i = 2; i < argc; i += 4) {
         if (RedisModule_StringToLongLong(argv[i + 3], &when) != REDISMODULE_OK) {
             RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
@@ -1286,9 +1279,19 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
         if (nokey) {
             m_dictAdd(tair_hash_obj->hash, takeAndRef(argv[i]), tair_hash_val);
         }
+
+        v[vlen++] = RedisModule_CreateStringFromString(ctx, argv[1]);
+        v[vlen++] = RedisModule_CreateStringFromString(ctx, argv[i]);
+        v[vlen++] = RedisModule_CreateStringFromString(ctx, argv[i + 1]);
+        v[vlen++] = RedisModule_CreateString(ctx, "ABS", 3);
+        v[vlen++] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->version);
+        v[vlen++] = RedisModule_CreateString(ctx, "PXAT", 4);
+        v[vlen++] = RedisModule_CreateStringFromLongLong(ctx, tair_hash_val->expire);
+        RedisModule_Replicate(ctx, "EXHSET", "v", v, vlen);
+        vlen = 0;
     }
 
-    RedisModule_ReplicateVerbatim(ctx);
+    RedisModule_Free(v);
     RedisModule_ReplyWithSimpleString(ctx, "OK");
     return REDISMODULE_OK;
 }
@@ -2992,7 +2995,7 @@ int Module_CreateCommands(RedisModuleCtx *ctx) {
     return REDISMODULE_OK;
 }
 
-int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+int __attribute__ ((visibility ("default"))) RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     REDISMODULE_NOT_USED(argv);
     REDISMODULE_NOT_USED(argc);
 

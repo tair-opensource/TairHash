@@ -70,7 +70,7 @@ Grammar and complexity：
 
 
 > EXHMSET <key> <field> <value> [field value...]  
-> time complexity：O(1)  
+> time complexity：O(n)  
 
 
 
@@ -688,7 +688,7 @@ Grammar and complexity：
 
 
 > EXHKEYS <key>  
-> time complexity：O(1)  
+> time complexity：O(n)  
 
 
 
@@ -720,7 +720,7 @@ Grammar and complexity：
 
 
 > EXHVALS <key>  
-> time complexity：O(1)  
+> time complexity：O(n)  
 
 
 
@@ -752,7 +752,7 @@ Grammar and complexity：
 
 
 > EXHGETALL <key>  
-> time complexity：O(1)  
+> time complexity：O(n)  
 
 
 

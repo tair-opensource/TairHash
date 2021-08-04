@@ -2941,10 +2941,10 @@ void TairHashTypeDigest(RedisModuleDigest *md, void *value) {
             const char *skey_ptr = RedisModule_StringPtrLen(skey, &skey_len);
             RedisModule_DigestAddStringBuffer(md, (unsigned char *)skey_ptr, skey_len);
             RedisModule_DigestAddStringBuffer(md, (unsigned char *)val_ptr, val_len);
+            RedisModule_DigestEndSequence(md);
         }
         m_dictReleaseIterator(di);
     }
-    RedisModule_DigestEndSequence(md);
 }
 
 int Module_CreateCommands(RedisModuleCtx *ctx) {

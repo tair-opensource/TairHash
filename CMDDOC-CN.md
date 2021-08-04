@@ -82,7 +82,7 @@
 
 
 > EXHMSET <key> <field> <value> [field value...]  
-> 时间复杂度：O(1)  
+> 时间复杂度：O(n)  
 
 
 
@@ -711,7 +711,7 @@
 
 
 > EXHKEYS <key>  
-> 时间复杂度：O(1)  
+> 时间复杂度：O(n)  
 
 
 
@@ -744,7 +744,7 @@
 
 
 > EXHVALS <key>  
-> 时间复杂度：O(1)  
+> 时间复杂度：O(n)  
 
 
 
@@ -777,7 +777,7 @@
 
 
 > EXHGETALL <key>  
-> 时间复杂度：O(1)  
+> 时间复杂度：O(n)  
 
 
 

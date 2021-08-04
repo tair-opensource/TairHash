@@ -2734,12 +2734,6 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
         version = RedisModule_LoadUnsigned(rdb);
         expire = RedisModule_LoadUnsigned(rdb);
         value = RedisModule_LoadString(rdb);
-        if (isExpire(expire)) {
-            RedisModule_FreeString(NULL, skey);
-            RedisModule_FreeString(NULL, value);
-            /* For field that has expired, we do not load it into DB */
-            continue;
-        }
         TairHashVal *hashv = createTairHashVal();
         hashv->version = version;
         hashv->expire = expire;
@@ -2761,41 +2755,23 @@ void TairHashTypeRdbSave(RedisModuleIO *rdb, void *value) {
     tairHashObj *o = (tairHashObj *)value;
     RedisModuleString *skey;
 
-    m_listNode *node, *nextnode;
     m_dictIterator *di;
     m_dictEntry *de;
 
-    uint64_t cnt = 0;
-
     if (o->hash) {
-        list *tmp_hash = m_listCreate();
-        di = m_dictGetIterator(o->hash);
-        while ((de = m_dictNext(di)) != NULL) {
-            if (isExpire(((TairHashVal *)dictGetVal(de))->expire)) {
-                /* For field that has expired, we do not save it. */
-                continue;
-            }
-            m_listAddNodeTail(tmp_hash, dictGetKey(de));
-            m_listAddNodeTail(tmp_hash, dictGetVal(de));
-            cnt++;
-        }
-        m_dictReleaseIterator(di);
-
-        RedisModule_SaveUnsigned(rdb, cnt);
+        RedisModule_SaveUnsigned(rdb, dictSize(o->hash));
         RedisModule_SaveString(rdb, o->key);
 
-        node = listFirst(tmp_hash);
-        while (node) {
-            skey = (RedisModuleString *)listNodeValue(node);
-            nextnode = listNextNode(node);
-            TairHashVal *val = (TairHashVal *)listNodeValue(nextnode);
+        di = m_dictGetIterator(o->hash);
+        while ((de = m_dictNext(di)) != NULL) {
+            skey = (RedisModuleString *)dictGetKey(de);
+            TairHashVal *val = (TairHashVal *)dictGetVal(de);
             RedisModule_SaveString(rdb, skey);
             RedisModule_SaveUnsigned(rdb, val->version);
             RedisModule_SaveUnsigned(rdb, val->expire);
             RedisModule_SaveString(rdb, val->value);
-            node = listNextNode(nextnode);
         }
-        m_listRelease(tmp_hash);
+        m_dictReleaseIterator(di);
     }
 }
 
@@ -2806,6 +2782,7 @@ void TairHashTypeAofRewrite(RedisModuleIO *aof, RedisModuleString *key, void *va
     m_dictIterator *di;
     m_dictEntry *de;
 
+    // TODO: rewrite to exhmset for big tairhash
     if (o->hash) {
         di = m_dictGetIterator(o->hash);
         while ((de = m_dictNext(di)) != NULL) {
@@ -2930,7 +2907,6 @@ void TairHashTypeDigest(RedisModuleDigest *md, void *value) {
     m_dictIterator *di;
     m_dictEntry *de;
 
-    /* TODO: Need to exclude expired fields? */
     if (o->hash) {
         di = m_dictGetIterator(o->hash);
         while ((de = m_dictNext(di)) != NULL) {

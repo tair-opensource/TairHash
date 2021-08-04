@@ -523,31 +523,31 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal "" $ret_val
     }
 
-    test {Swapdb in rdb save and load} {
-        r select 7
-        r del tairhashkey
-        create_big_tairhash_with_expire tairhashkey 10 2
+    # test {Swapdb in rdb save and load} {
+    #     r select 7
+    #     r del tairhashkey
+    #     create_big_tairhash_with_expire tairhashkey 10 2
         
-        r swapdb 7 13
-        r swapdb 13 14 
+    #     r swapdb 7 13
+    #     r swapdb 13 14 
 
-        r select 14
-        assert_equal 1 [r dbsize]
+    #     r select 14
+    #     assert_equal 1 [r dbsize]
 
-        r select 7
-        assert_equal 0 [r dbsize]
+    #     r select 7
+    #     assert_equal 0 [r dbsize]
 
-        r bgsave
-        waitForBgsave r
-        r debug reload
+    #     r bgsave
+    #     waitForBgsave r
+    #     r debug reload
 
-        r select 14
-        assert_equal 1 [r dbsize]
+    #     r select 14
+    #     assert_equal 1 [r dbsize]
 
-        after 3000
+    #     after 3000
 
-        assert_equal 0 [r dbsize]
-    }
+    #     assert_equal 0 [r dbsize]
+    # }
 
     test {Active expire aof} {
         r config set aof-use-rdb-preamble no
@@ -1231,57 +1231,58 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal 200 [r exhttl tairhashkey field]
     }
 
-    test {SwapDB with active expire} {
-        r flushall
-        r select 10
-        create_big_tairhash_with_expire exk1 10 2
-        create_big_tairhash_with_expire exk2 10 2
-        create_big_tairhash_with_expire exk3 10 2
+    # test {SwapDB with active expire} {
+    #     r flushall
+    #     r select 10
+    #     create_big_tairhash_with_expire exk1 10 2
+    #     create_big_tairhash_with_expire exk2 10 2
+    #     create_big_tairhash_with_expire exk3 10 2
 
-        assert_equal 3 [r dbsize]
-        r swapdb 10 11
-        assert_equal 0 [r dbsize]
-        r select 11
-        assert_equal 3 [r dbsize]
-        after 3000
-        assert_equal 0 [r dbsize]   
+    #     assert_equal 3 [r dbsize]
+    #     r swapdb 10 11
+    #     assert_equal 0 [r dbsize]
+    #     r select 11
+    #     assert_equal 3 [r dbsize]
+    #     after 3000
+    #     assert_equal 0 [r dbsize]   
 
-        set info [r exhexpireinfo]
-        assert { [string match "*db: 11, active_expired_fields: 30*" $info] }
+    #     set info [r exhexpireinfo]
+    #     assert { [string match "*db: 11, active_expired_fields: 30*" $info] }
 
-        r select 10
-        create_big_tairhash_with_expire exk1 20 2
-        create_big_tairhash_with_expire exk2 20 2
-        create_big_tairhash_with_expire exk3 20 2
+    #     r select 10
+    #     create_big_tairhash_with_expire exk1 20 2
+    #     create_big_tairhash_with_expire exk2 20 2
+    #     create_big_tairhash_with_expire exk3 20 2
 
-        r swapdb 10 11
-        r swapdb 11 12
-        r swapdb 12 10
+    #     r swapdb 10 11
+    #     r swapdb 11 12
+    #     r swapdb 12 10
 
-        after 3000
-        assert_equal 0 [r dbsize]   
-        set info [r exhexpireinfo]
-        assert { [string match "*db: 10, active_expired_fields: 60*db: 12, active_expired_fields: 30*" $info] }
-    }
+    #     after 3000
+    #     assert_equal 0 [r dbsize]   
+    #     set info [r exhexpireinfo]
+    #     assert { [string match "*db: 10, active_expired_fields: 60*db: 12, active_expired_fields: 30*" $info] }
+    # }
 
-    test {Copy with active expire} {
-        r del tairhashkey
-        r del tairhashkey_new
-        assert_equal 1 [r exhset tairhashkey field1 val1 ex 2]
-        assert_equal 1 [r exhset tairhashkey field2 val2 ex 1]
+    # If you are run in SORT_MODE mode ,you can uncomment the following lines
+    # test {Copy with active expire} {
+    #     r del tairhashkey
+    #     r del tairhashkey_new
+    #     assert_equal 1 [r exhset tairhashkey field1 val1 ex 2]
+    #     assert_equal 1 [r exhset tairhashkey field2 val2 ex 1]
 
-        assert_equal 1 [r copy tairhashkey tairhashkey_new]
+    #     assert_equal 1 [r copy tairhashkey tairhashkey_new]
 
-        set slave_ttl [r exhttl tairhashkey_new field1]
-        assert {$slave_ttl <= 2 && $slave_ttl > 0 }
+    #     set slave_ttl [r exhttl tairhashkey_new field1]
+    #     assert {$slave_ttl <= 2 && $slave_ttl > 0 }
 
-        set slave_ttl [r exhttl tairhashkey_new field2]
-        assert {$slave_ttl <= 1 && $slave_ttl > 0 }
+    #     set slave_ttl [r exhttl tairhashkey_new field2]
+    #     assert {$slave_ttl <= 1 && $slave_ttl > 0 }
 
-        after 3000
+    #     after 3000
 
-        assert_equal 0 [r exists tairhashkey_new]
-    }
+    #     assert_equal 0 [r exists tairhashkey_new]
+    # }
 
     test {Reload after Exhset } {
         r del tairhashkey
@@ -1827,28 +1828,28 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
                 assert_equal 0 $exist_num
             }
 
-            test {SwapDB with active expire in replica} {
-                $master flushall
-                $master select 10
-                $master exhset exk1 f v ex 2
-                $master exhset exk2 f v ex 2
-                $master exhset exk3 f v ex 2
+            # test {SwapDB with active expire in replica} {
+            #     $master flushall
+            #     $master select 10
+            #     $master exhset exk1 f v ex 2
+            #     $master exhset exk2 f v ex 2
+            #     $master exhset exk3 f v ex 2
 
-                assert_equal 3 [$master dbsize]
-                $master swapdb 10 11
-                assert_equal 0 [$master dbsize]
-                $master select 11
-                assert_equal 3 [$master dbsize]
+            #     assert_equal 3 [$master dbsize]
+            #     $master swapdb 10 11
+            #     assert_equal 0 [$master dbsize]
+            #     $master select 11
+            #     assert_equal 3 [$master dbsize]
 
-                $master WAIT 1 5000
+            #     $master WAIT 1 5000
 
-                $slave select 11
-                assert_equal 3 [$slave dbsize]
+            #     $slave select 11
+            #     assert_equal 3 [$slave dbsize]
 
-                after 3000
-                assert_equal 0 [$master dbsize]   
-                assert_equal 0 [$slave dbsize]  
-            }
+            #     after 3000
+            #     assert_equal 0 [$master dbsize]   
+            #     assert_equal 0 [$slave dbsize]  
+            # }
         }
     }
 }

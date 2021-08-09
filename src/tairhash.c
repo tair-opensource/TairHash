@@ -424,6 +424,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
         zsl_len = g_expire_index[current_db]->length;
         if (zsl_len == 0) {
             current_db++;
+            m_listRelease(keys);
             continue;
         }
 
@@ -757,6 +758,7 @@ inline static void latencySensitivePassiveExpire(RedisModuleCtx *ctx, RedisModul
 #ifdef SORT_MODE
     zsl_len = g_expire_index[dbid]->length;
     if (zsl_len == 0) {
+        m_listRelease(keys);
         return;
     }
 
@@ -833,6 +835,7 @@ inline static void latencySensitivePassiveExpire(RedisModuleCtx *ctx, RedisModul
             m_zslInsert(g_expire_index[dbid], ln->score, takeAndRef(tair_hash_obj->key));
         }
 #endif
+        RedisModule_CloseKey(real_key);
         m_listDelNode(keys, node);
     }
 

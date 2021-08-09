@@ -12,7 +12,11 @@ set(CMAKE_C_VISIBILITY_PRESET hidden)
 
 SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)  
 
+option(SORT_MODE "Use two-level sort index to to implement active expire" OFF)
+
+if(SORT_MODE)
 add_definitions(-DSORT_MODE)
+endif(SORT_MODE)
 
 include_directories(${ROOT_DIR}/dep)
 aux_source_directory(${ROOT_DIR}/dep USRC)

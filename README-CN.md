@@ -25,7 +25,7 @@
 优点：过期淘汰效率比较高    
 缺点：由于SORT_MODE实现依赖`unlink2`回调函数(见这个[PR](https://github.com/redis/redis/pull/8999)))同步释放索引结构，因此需要确保你的Redis中REDISMODULE_TYPE_METHOD_VERSION不低于4。
 
-使用方式：在顶层CMakeLists.txt中添加`add_definitions(-DSORT_MODE)`定义，并重新编译
+使用方式：cmake的时候加上`-DSORT_MODE=yes`选项，并重新编译
 ### SCAN_MODE：
 - 不对TairHash进行全局排序
 - 每个TairHash内部依然会使用一个排序索引对fields进行排序
@@ -36,7 +36,7 @@
 优点：可以运行在低版本的redis中    
 缺点：过期淘汰效率较低  
 
-打开方式：在顶层CMakeLists.txt中去掉`add_definitions(-DSORT_MODE)`定义，并重新编译
+打开方式：cmake的时候加上`-DSORT_MODE=no`选项，并重新编译
 
 <br/>
 

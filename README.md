@@ -23,7 +23,7 @@
 Advantages: higher efficiency of expire elimination
 Disadvantages: Because the SORT_MODE implementation relies on the `unlink2` callback function (see this [PR](https://github.com/redis/redis/pull/8999))) to release the index structure synchronously, you need to ensure that REDISMODULE_TYPE_METHOD_VERSION in your Redis is not Less than 4.
 
-Usage: Add `add_definitions(-DSORT_MODE)` definition in the top CMakeLists.txt, and recompile
+Usage: cmake with `-DSORT_MODE=yes` option, and recompile
 
 ### SCAN_MODE:
 - Do not sort TairHash globally
@@ -35,7 +35,7 @@ Usage: Add `add_definitions(-DSORT_MODE)` definition in the top CMakeLists.txt, 
 Advantages: can run in the low version of redis
 Disadvantages: low efficiency of expire elimination
 
-Usage: Remove `add_definitions(-DSORT_MODE)` definition in the top CMakeLists.txt, and recompile
+Usage: cmake with `-DSORT_MODE=no` option, and recompile
 
 <br/>
 

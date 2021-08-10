@@ -962,6 +962,8 @@ int tairHashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
 
         RedisModule_ReplyWithLongLong(ctx, 1);
 
+        tair_hash_val->version += 1;
+        
         if (ex_flags & TAIR_HASH_SET_WITH_ABS_VER) {
             tair_hash_val->version = version;
         }

@@ -1226,7 +1226,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal -1 [r exhttl tairhashkey field]
         assert_equal 1 [r exhexpire tairhashkey field 100 VER 1]
         assert_equal 100 [r exhttl tairhashkey field]
-        assert_equal 1 [r exhver tairhashkey field ]
+        assert_equal 2 [r exhver tairhashkey field ]
         assert_equal 1 [r exhexpire tairhashkey field 200 VER 0]
         assert_equal 200 [r exhttl tairhashkey field]
     }

@@ -9,7 +9,9 @@
 - Support efficient active expire and passivity expire for field
 - The cmd is similar to the native hash data type
 - Support redis swapdb, rename, move and copy command
-### The principle of efficient expiration:
+
+## Active expire
+### SORT_MODE：
 ![avatar](imgs/tairhash_index.png)
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
 - The first-level uses the smallest ttl in the second-level for sorting, so the main key is globally ordered
@@ -18,9 +20,24 @@
 - Every time you read or write a field, it will also trigger the expiration of the field itself
 - All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
-<br/>
+Advantages: higher efficiency of expire elimination
+Disadvantages: Because the SORT_MODE implementation relies on the `unlink2` callback function (see this [PR](https://github.com/redis/redis/pull/8999))) to release the index structure synchronously, you need to ensure that REDISMODULE_TYPE_METHOD_VERSION in your Redis is not Less than 4.
 
-At the same time, we also open sourced an enhanced string structure, which can set the version number for value and support memcached semantics. For details, please refer to [here](https://github.com/alibaba/TairString)
+Usage: cmake with `-DSORT_MODE=yes` option, and recompile
+
+### SCAN_MODE:
+- Do not sort TairHash globally
+- Each TairHash will still use a sort index to sort the fields internally
+- The built-in timer will periodically use the SCAN command to find the TairHash that contains the expired field, and then check the sort index inside the TairHash to eliminate the field
+- Every time you read or write a field, it will also trigger the expiration of the field itself
+- All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
+
+Advantages: can run in the low version of redis
+Disadvantages: low efficiency of expire elimination
+
+Usage: cmake with `-DSORT_MODE=no` option, and recompile
+
+<br/>
 
 ## Quick Start
 
@@ -85,7 +102,3 @@ then the tairhash_module.so library file will be generated in the lib directory
 
 ## API
 [Reference](CMDDOC.md)
-
-
-## Applicable Redis version   
-Since TairHash relies on the `unlink2` callback function to release the index structure synchronously, you need to make sure that REDISMODULE_TYPE_METHOD_VERSION in your Redis is not less than 4.

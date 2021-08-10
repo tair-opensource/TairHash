@@ -6,11 +6,13 @@
 ### 主要的特性如下：
 
 - field支持单独设置expire和version
-- 针对field支持高效的active expire和passivity expire
+- 针对field支持高效的active expire和passivity expire，其中active expire支持SORT_MODE和SCAN_MODE两种模式。
 - 语法和原生hash数据类型类似
 - 支持redis的swapdb、rename、move、copy等语义
 
-### 高效过期实现原理：
+## Active expire
+### SORT_MODE：
+
 ![avatar](imgs/tairhash_index.png)
 
 - 使用两级排序索引，第一级对tairhash主key进行排序，第二级针对每个tairhash内部的field进行排序
@@ -19,11 +21,24 @@
 - 每一次对tairhash的写操作，也会先检查第一级索引，并最多过期三个field，这些field不一定属于当前正在操作的key，因此理论上写的越快淘汰速度也就越快
 - 每一次读写field，也会触发对这个field自身的过期淘汰操作
 - 排序中所有的key和field都是指针引用，无内存拷贝，无内存膨胀问题
+  
+优点：过期淘汰效率比较高    
+缺点：由于SORT_MODE实现依赖`unlink2`回调函数(见这个[PR](https://github.com/redis/redis/pull/8999)))同步释放索引结构，因此需要确保你的Redis中REDISMODULE_TYPE_METHOD_VERSION不低于4。
 
+使用方式：cmake的时候加上`-DSORT_MODE=yes`选项，并重新编译
+### SCAN_MODE：
+- 不对TairHash进行全局排序
+- 每个TairHash内部依然会使用一个排序索引对fields进行排序
+- 内置定时器会周期使用SCAN命令找到包含过期field的TairHash，然后检查TairHash内部的排序索引，进行field的淘汰
+- 每一次读写field，也会触发对这个field自身的过期淘汰操作
+- 排序中所有的key和field都是指针引用，无内存拷贝，无内存膨胀问题
+
+优点：可以运行在低版本的redis中    
+缺点：过期淘汰效率较低  
+
+打开方式：cmake的时候加上`-DSORT_MODE=no`选项，并重新编译
 
 <br/>
-
-同时，我们还开源了一个增强型的string结构，它可以给value设置版本号并支持memcached语义，具体可参见[这里](https://github.com/alibaba/TairString)。
 
 ## 快速开始
 
@@ -87,8 +102,3 @@ cmake ../ && make -j
 
 ## API
 [参考这里](CMDDOC-CN.md)
-
-<br/>
-
-## 适用redis版本  
-由于TairHash依赖`unlink2`回调函数同步释放索引结构，因此需要确保你的Redis中REDISMODULE_TYPE_METHOD_VERSION不低于4。

@@ -32,7 +32,7 @@ Usage: cmake with `-DSORT_MODE=yes` option, and recompile
 - Every time you read or write a field, it will also trigger the expiration of the field itself
 - All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
-Advantages: can run in the low version of redis    
+Advantages: can run in the low version of redis (redis 5.x and  redis 6.x) 
 Disadvantages: low efficiency of expire elimination
 
 Usage: cmake with `-DSORT_MODE=no` option, and recompile

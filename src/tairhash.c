@@ -117,10 +117,12 @@ inline RedisModuleString *takeAndRef(RedisModuleString *str) {
         }                                                                                              \
     } while (0)
 #else
-#define MY_Assert(e) \
-    do {             \
-        assert((e)); \
-    } while (0)
+#define MY_Assert(_e) ((_e) ? (void)0 : (_myAssert(#_e, __FILE__, __LINE__), abort()))
+void _myAssert(const char *estr, const char *file, int line) {
+    fprintf(stderr, "=== ASSERTION FAILED ===");
+    fprintf(stderr, "==> %s:%d '%s' is not true", file, line, estr);
+    *((char *)-1) = 'x';
+}
 
 #define ACTIVE_EXPIRE_INSERT(dbid, o, field, expire)                                     \
     do {                                                                                 \
@@ -414,7 +416,10 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
     long long start = RedisModule_Milliseconds();
     for (; i < dbs_per_call; ++i) {
         current_db = current_db % DB_NUM;
-        RedisModule_SelectDb(ctx, current_db);
+        if (RedisModule_SelectDb(ctx, current_db) != REDISMODULE_OK) {
+            current_db++;
+            continue;
+        }
 
         int expire_keys_per_loop = tair_hash_active_expire_keys_per_loop;
 

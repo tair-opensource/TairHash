@@ -421,6 +421,11 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
             continue;
         }
 
+        if (RedisModule_DbSize(ctx) == 0) {
+            current_db++;
+            continue;
+        }
+
         int expire_keys_per_loop = tair_hash_active_expire_keys_per_loop;
 
         list *keys = m_listCreate();
@@ -536,8 +541,6 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
             }
 
             if (start_index) {
-                 size_t len;
-                const char * ptr = RedisModule_StringPtrLen(key, &len);
                 m_zslDeleteRangeByRank(tair_hash_obj->expire_index, 1, start_index);
                 delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj);
             }
@@ -968,7 +971,7 @@ int tairHashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
         RedisModule_ReplyWithLongLong(ctx, 1);
 
         tair_hash_val->version += 1;
-        
+
         if (ex_flags & TAIR_HASH_SET_WITH_ABS_VER) {
             tair_hash_val->version = version;
         }

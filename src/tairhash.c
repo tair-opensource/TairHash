@@ -99,23 +99,21 @@ inline RedisModuleString *takeAndRef(RedisModuleString *str) {
         RedisModule_Assert((e)); \
     } while (0)
 
-#define ACTIVE_EXPIRE_INSERT(dbid, o, field, expire)                                                   \
-    do {                                                                                               \
-        if (enable_active_expire) {                                                                    \
-            if (expire) {                                                                              \
-                long long before_min_score = -1;                                                       \
-                if (o->expire_index->header->level[0].forward) {                                       \
-                    before_min_score = o->expire_index->header->level[0].forward->score;               \
-                }                                                                                      \
-                m_zslInsert(o->expire_index, expire, takeAndRef(field));                               \
-                long long after_min_score = o->expire_index->header->level[0].forward->score;          \
-                if (before_min_score > 0) {                                                            \
-                    m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score); \
-                } else {                                                                               \
-                    m_zslInsert(g_expire_index[dbid], after_min_score, takeAndRef(o->key));            \
-                }                                                                                      \
-            }                                                                                          \
-        }                                                                                              \
+#define ACTIVE_EXPIRE_INSERT(dbid, o, field, expire)                                               \
+    do {                                                                                           \
+        if (expire) {                                                                              \
+            long long before_min_score = -1;                                                       \
+            if (o->expire_index->header->level[0].forward) {                                       \
+                before_min_score = o->expire_index->header->level[0].forward->score;               \
+            }                                                                                      \
+            m_zslInsert(o->expire_index, expire, takeAndRef(field));                               \
+            long long after_min_score = o->expire_index->header->level[0].forward->score;          \
+            if (before_min_score > 0) {                                                            \
+                m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score); \
+            } else {                                                                               \
+                m_zslInsert(g_expire_index[dbid], after_min_score, takeAndRef(o->key));            \
+            }                                                                                      \
+        }                                                                                          \
     } while (0)
 #else
 #define MY_Assert(_e) ((_e) ? (void)0 : (_myAssert(#_e, __FILE__, __LINE__), abort()))
@@ -125,79 +123,69 @@ void _myAssert(const char *estr, const char *file, int line) {
     *((char *)-1) = 'x';
 }
 
-#define ACTIVE_EXPIRE_INSERT(dbid, o, field, expire)                                     \
-    do {                                                                                 \
-        REDISMODULE_NOT_USED(dbid);                                                      \
-        if (enable_active_expire) {                                                      \
-            if (expire) {                                                                \
-                long long before_min_score = -1;                                         \
-                if (o->expire_index->header->level[0].forward) {                         \
-                    before_min_score = o->expire_index->header->level[0].forward->score; \
-                }                                                                        \
-                m_zslInsert(o->expire_index, expire, takeAndRef(field));                 \
-            }                                                                            \
-        }                                                                                \
+#define ACTIVE_EXPIRE_INSERT(dbid, o, field, expire)                                 \
+    do {                                                                             \
+        REDISMODULE_NOT_USED(dbid);                                                  \
+        if (expire) {                                                                \
+            long long before_min_score = -1;                                         \
+            if (o->expire_index->header->level[0].forward) {                         \
+                before_min_score = o->expire_index->header->level[0].forward->score; \
+            }                                                                        \
+            m_zslInsert(o->expire_index, expire, takeAndRef(field));                 \
+        }                                                                            \
     } while (0)
 #endif
 
 #ifdef SORT_MODE
-#define ACTIVE_EXPIRE_UPDATE(dbid, o, field, cur_expire, new_expire)                               \
-    do {                                                                                           \
-        if (enable_active_expire) {                                                                \
-            if (cur_expire != new_expire) {                                                        \
-                long long before_min_score = -1;                                                   \
-                m_zskiplistNode *ln = o->expire_index->header->level[0].forward;                   \
-                MY_Assert(ln != NULL);                                                             \
-                before_min_score = ln->score;                                                      \
-                m_zslUpdateScore(o->expire_index, cur_expire, field, new_expire);                  \
-                long long after_min_score = o->expire_index->header->level[0].forward->score;      \
-                m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score); \
-            }                                                                                      \
-        }                                                                                          \
+#define ACTIVE_EXPIRE_UPDATE(dbid, o, field, cur_expire, new_expire)                           \
+    do {                                                                                       \
+        if (cur_expire != new_expire) {                                                        \
+            long long before_min_score = -1;                                                   \
+            m_zskiplistNode *ln = o->expire_index->header->level[0].forward;                   \
+            MY_Assert(ln != NULL);                                                             \
+            before_min_score = ln->score;                                                      \
+            m_zslUpdateScore(o->expire_index, cur_expire, field, new_expire);                  \
+            long long after_min_score = o->expire_index->header->level[0].forward->score;      \
+            m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score); \
+        }                                                                                      \
     } while (0)
 
 #else
-#define ACTIVE_EXPIRE_UPDATE(dbid, o, field, cur_expire, new_expire)              \
-    do {                                                                          \
-        if (enable_active_expire) {                                               \
-            if (cur_expire != new_expire) {                                       \
-                long long before_min_score = -1;                                  \
-                m_zskiplistNode *ln = o->expire_index->header->level[0].forward;  \
-                MY_Assert(ln != NULL);                                            \
-                before_min_score = ln->score;                                     \
-                m_zslUpdateScore(o->expire_index, cur_expire, field, new_expire); \
-            }                                                                     \
-        }                                                                         \
+#define ACTIVE_EXPIRE_UPDATE(dbid, o, field, cur_expire, new_expire)          \
+    do {                                                                      \
+        if (cur_expire != new_expire) {                                       \
+            long long before_min_score = -1;                                  \
+            m_zskiplistNode *ln = o->expire_index->header->level[0].forward;  \
+            MY_Assert(ln != NULL);                                            \
+            before_min_score = ln->score;                                     \
+            m_zslUpdateScore(o->expire_index, cur_expire, field, new_expire); \
+        }                                                                     \
     } while (0)
 #endif
 
 #ifdef SORT_MODE
-#define ACTIVE_EXPIRE_DELETE(dbid, o, field, cur_expire)                                              \
-    do {                                                                                              \
-        if (enable_active_expire) {                                                                   \
-            if (cur_expire != 0) {                                                                    \
-                long long before_min_score = -1;                                                      \
-                m_zskiplistNode *ln = o->expire_index->header->level[0].forward;                      \
-                MY_Assert(ln != NULL);                                                                \
-                before_min_score = ln->score;                                                         \
-                m_zslDelete(o->expire_index, cur_expire, field, NULL);                                \
-                if (o->expire_index->header->level[0].forward) {                                      \
-                    long long after_min_score = o->expire_index->header->level[0].forward->score;     \
-                    m_zslUpdateScore(g_expire_index[dbid], before_min_score, field, after_min_score); \
-                } else {                                                                              \
-                    m_zslDelete(g_expire_index[dbid], before_min_score, field, NULL);                 \
-                }                                                                                     \
-            }                                                                                         \
-        }                                                                                             \
+#define ACTIVE_EXPIRE_DELETE(dbid, o, field, cur_expire)                                          \
+    do {                                                                                          \
+        if (cur_expire != 0) {                                                                    \
+            long long before_min_score = -1;                                                      \
+            m_zskiplistNode *ln = o->expire_index->header->level[0].forward;                      \
+            MY_Assert(ln != NULL);                                                                \
+            before_min_score = ln->score;                                                         \
+            m_zslDelete(o->expire_index, cur_expire, field, NULL);                                \
+            if (o->expire_index->header->level[0].forward) {                                      \
+                long long after_min_score = o->expire_index->header->level[0].forward->score;     \
+                m_zslUpdateScore(g_expire_index[dbid], before_min_score, field, after_min_score); \
+            } else {                                                                              \
+                m_zslDelete(g_expire_index[dbid], before_min_score, field, NULL);                 \
+            }                                                                                     \
+        }                                                                                         \
     } while (0)
 #else
-#define ACTIVE_EXPIRE_DELETE(dbid, o, field, cur_expire)               \
-    do {                                                               \
-        if (enable_active_expire) {                                    \
-            if (cur_expire != 0) {                                     \
-                m_zslDelete(o->expire_index, cur_expire, field, NULL); \
-            }                                                          \
-        }                                                              \
+#define ACTIVE_EXPIRE_DELETE(dbid, o, field, cur_expire)           \
+    do {                                                           \
+        if (cur_expire != 0) {                                     \
+            m_zslDelete(o->expire_index, cur_expire, field, NULL); \
+        }                                                          \
     } while (0)
 #endif
 
@@ -596,7 +584,8 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
     }
 
     stat_last_active_expire_time_msec = RedisModule_Milliseconds() - start;
-    stat_max_active_expire_time_msec = stat_max_active_expire_time_msec < stat_last_active_expire_time_msec ? stat_last_active_expire_time_msec : stat_max_active_expire_time_msec;
+    stat_max_active_expire_time_msec = stat_max_active_expire_time_msec < stat_last_active_expire_time_msec ? 
+    stat_last_active_expire_time_msec : stat_max_active_expire_time_msec;
     total_expire_time += stat_last_active_expire_time_msec;
     ++loop_cnt;
     if (loop_cnt % 1000 == 0) {
@@ -1793,7 +1782,9 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         }
     }
 
-    if ((incr < 0 && cur_val < 0 && incr < (LLONG_MIN - cur_val)) || (incr > 0 && cur_val > 0 && incr > (LLONG_MAX - cur_val)) || (max_p != NULL && cur_val + incr > max) || (min_p != NULL && cur_val + incr < min)) {
+    if ((incr < 0 && cur_val < 0 && incr < (LLONG_MIN - cur_val)) || 
+        (incr > 0 && cur_val > 0 && incr > (LLONG_MAX - cur_val)) || 
+        (max_p != NULL && cur_val + incr > max) || (min_p != NULL && cur_val + incr < min)) {
         if (nokey) {
             tairHashValRelease(tair_hash_val);
         }
@@ -1847,7 +1838,8 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     }
 
     if (milliseconds > 0) {
-        RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], tair_hash_val->value, "abs", tair_hash_val->version, "pxat", (milliseconds + RedisModule_Milliseconds()));
+        RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], tair_hash_val->value, "abs", 
+            tair_hash_val->version, "pxat", (milliseconds + RedisModule_Milliseconds()));
     } else {
         RedisModule_Replicate(ctx, "EXHSET", "ssscl", argv[1], argv[2], tair_hash_val->value, "abs", tair_hash_val->version);
     }
@@ -2081,7 +2073,8 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
     }
 
     if (milliseconds > 0) {
-        RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], tair_hash_val->value, "abs", tair_hash_val->version, "pxat", (milliseconds + RedisModule_Milliseconds()));
+        RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], tair_hash_val->value, "abs", tair_hash_val->version, "pxat", 
+            (milliseconds + RedisModule_Milliseconds()));
     } else {
         RedisModule_Replicate(ctx, "EXHSET", "ssscl", argv[1], argv[2], tair_hash_val->value, "abs", tair_hash_val->version);
     }
@@ -3048,9 +3041,7 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
         hashv->value = takeAndRef(value);
         m_dictAdd(o->hash, takeAndRef(skey), hashv);
         if (hashv->expire) {
-            if (enable_active_expire) {
-                ACTIVE_EXPIRE_INSERT(dbid, o, skey, hashv->expire);
-            }
+            ACTIVE_EXPIRE_INSERT(dbid, o, skey, hashv->expire);
         }
         RedisModule_FreeString(NULL, value);
         RedisModule_FreeString(NULL, skey);
@@ -3191,9 +3182,7 @@ void *TairHashTypeCopy2(RedisModuleKeyOptCtx *ctx, const void *value) {
         newval->value = RedisModule_CreateStringFromString(NULL, oldval->value);
         m_dictAdd(new->hash, field, newval);
         if (newval->expire) {
-            if (enable_active_expire) {
-                ACTIVE_EXPIRE_INSERT(to_dbid, new, field, newval->expire);
-            }
+            ACTIVE_EXPIRE_INSERT(to_dbid, new, field, newval->expire);
         }
     }
     m_dictReleaseIterator(di);
@@ -3352,12 +3341,13 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
         return REDISMODULE_ERR;
     }
 
-    if (enable_active_expire) {
 #ifdef SORT_MODE
-        for (int i = 0; i < DB_NUM; i++) {
-            g_expire_index[i] = m_zslCreate();
-        }
+    for (int i = 0; i < DB_NUM; i++) {
+        g_expire_index[i] = m_zslCreate();
+    }
 #endif
+
+    if (enable_active_expire) {
         RedisModuleCtx *ctx2 = RedisModule_GetThreadSafeContext(NULL);
         startExpireTimer(ctx2, NULL);
         RedisModule_FreeThreadSafeContext(ctx2);

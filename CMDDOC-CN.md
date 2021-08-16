@@ -7,7 +7,7 @@
 语法及复杂度：
 
 
-> EXHSET <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS version] 
+> EXHSET <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS version] [KEEPTTL]
 > 时间复杂度：O(1)
 
 
@@ -25,13 +25,13 @@
 > key: 用于查找该TairHash的键  
 > field: TairHash中的一个元素  
 > value: TairHash中的一个元素对应的值  
-> EX: 指定field的相对过期时间，单位为秒，为0表示不过期  
-> EXAT: 指定field的绝对过期时间，单位为秒，为0表示不过期  
-> PX: 指定field的相对过期时间，单位为毫秒，为0表示不过期  
-> PXAT: 指定field的绝对过期时间，单位为毫秒 ，为0表示不过期  
+> EX: 指定field的相对过期时间，单位为秒，0表示立刻过期
+> EXAT: 指定field的绝对过期时间，单位为秒，0表示立刻过期
+> PX: 指定field的相对过期时间，单位为毫秒，0表示立刻过期
+> PXAT: 指定field的绝对过期时间，单位为毫秒 ，0表示立刻过期
 > NX/XX: NX表示当要插入的field不存在的时候才允许插入，XX表示只有当field存在的时候才允许插入  
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
-
+> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号    
+> KEEPTTL: 当未指定EX/EXAT/PX/PXAT时保留field的过期时间
 
 返回值：
 
@@ -133,7 +133,7 @@
 
 > key: 用于查找该TairHash的键    
 > field: TairHash中的一个元素    
-> milliseconds-timestamp: 以毫秒为单位的时间戳    
+> milliseconds-timestamp: 以毫秒为单位的时间戳，0表示立刻过期   
 > VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号    
 
 
@@ -168,7 +168,7 @@
 
 > key: 用于查找该TairHash的键    
 > field: TairHash中的一个元素    
-> milliseconds: 以毫秒为单位的过期时间    
+> milliseconds: 以毫秒为单位的过期时间，0表示立刻过期       
 > VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号    
 
 
@@ -201,7 +201,7 @@
 
 > key: 用于查找该TairHash的键  
 > field: TairHash中的一个元素  
-> timestamp: 以秒为单位的时间戳  
+> timestamp: 以秒为单位的时间戳，0表示立刻过期   
 > VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
 
 
@@ -237,7 +237,7 @@
 
 > key: 用于查找该TairHash的键  
 > field: TairHash中的一个元素  
-> seconds: 以秒为单位的过期时间  
+> seconds: 以秒为单位的过期时间，0表示立刻过期     
 > VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
 
 
@@ -392,7 +392,7 @@
 语法及复杂度：
 
 
-> EXHINCRBY <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version]   
+> EXHINCRBY <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [KEEPTTL]  
 > [MIN minval] [MAX maxval]  
 > 时间复杂度：O(1)  
 
@@ -412,12 +412,12 @@
 > key: 用于查找该TairHash的键  
 > field: TairHash中的一个元素  
 > value: field对应的值  
-> EX: 指定field的相对过期时间，单位为秒 ，为0表示不过期  
-> EXAT: 指定field的绝对过期时间，单位为秒 ，为0表示不过期  
-> PX: 指定field的相对过期时间，单位为毫秒，为0表示不过期  
-> PXAT: 指定field的绝对过期时间，单位为毫秒，为0表示不过期  
+> EX: 指定field的相对过期时间，单位为秒 ，0表示立刻过期
+> EXAT: 指定field的绝对过期时间，单位为秒 ，0表示立刻过期
+> PX: 指定field的相对过期时间，单位为毫秒，0表示立刻过期
+> PXAT: 指定field的绝对过期时间，单位为毫秒，0表示立刻过期
 > VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
-
+> KEEPTTL: 当未指定EX/EXAT/PX/PXAT时保留field的过期时间
 
 返回值：
 
@@ -433,7 +433,7 @@
 语法及复杂度：
 
 
-> EXHINCRBYFLOAT <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval]  
+> EXHINCRBYFLOAT <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [KEEPTTL] 
 > 时间复杂度：O(1)  
 
 
@@ -452,12 +452,12 @@
 > key: 用于查找该TairHash的键  
 > field: TairHash中的一个元素  
 > value: field对应的值  
-> EX: 指定field的相对过期时间，单位为秒，为0表示不过期  
-> EXAT: 指定field的绝对过期时间，单位为秒，为0表示不过期  
-> PX: 指定field的相对过期时间，单位为毫秒，为0表示不过期  
-> PXAT: 指定field的绝对过期时间，单位为毫秒，为0表示不过期  
+> EX: 指定field的相对过期时间，单位为秒，0表示立刻过期
+> EXAT: 指定field的绝对过期时间，单位为秒，0表示立刻过期
+> PX: 指定field的相对过期时间，单位为毫秒，0表示立刻过期
+> PXAT: 指定field的绝对过期时间，单位为毫秒，0表示立刻过期
 > VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
-
+> KEEPTTL: 当未指定EX/EXAT/PX/PXAT时保留field的过期时间
 
 返回值：
 

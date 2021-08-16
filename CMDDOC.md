@@ -6,7 +6,7 @@
 Grammar and complexity：
 
 
-> EXHSET <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS version] 
+> EXHSET <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS version] [KEEPTTL]
 > time complexity：O(1)
 
 Command Description：  
@@ -18,13 +18,13 @@ parameter：
 > key: The key used to find the TairHash
 > field: An element in TairHash
 > value: The value corresponding to an element in TairHash
-> EX: The relative expiration time of the specified field, in seconds, 0 means no expiration
-> EXAT: Specify the absolute expiration time of the field, in seconds, 0 means no expiration 
-> PX: The relative expiration time of the specified field, in milliseconds, 0 means no expiration
-> PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means no expiration
+> EX: The relative expiration time of the specified field, in seconds, 0 means expire immediately
+> EXAT: Specify the absolute expiration time of the field, in seconds, 0 means expire immediately
+> PX: The relative expiration time of the specified field, in milliseconds, 0 means expire immediately
+> PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means expire immediately
 > NX/XX: NX means inserting is allowed only when the field to be inserted does not exist, XX means inserting is allowed only when the field exists
 > VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.
-
+> KEEPTTL: Retain the time to live associated with the field. KEEPTTL cannot be used together with EX/EXAT/PX/PXAT
 
 Return：
 
@@ -120,7 +120,7 @@ Parameter：
 
 > key: The key used to find the TairHash
 > field: An element in TairHash
-> milliseconds-timestamp: Timestamp in milliseconds
+> milliseconds-timestamp: Timestamp in milliseconds, 0 means expire immediately
 > VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.   
 
 
@@ -155,7 +155,7 @@ Parameter：
 
 > key: The key used to find the TairHash
 > field: An element in TairHash   
-> milliseconds: Expiration time in milliseconds
+> milliseconds: Expiration time in milliseconds, 0 means expire immediately
 > VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.   
 
 
@@ -190,7 +190,7 @@ Parameter：
 
 > key: The key used to find the TairHash
 > field: An element in TairHash
-> timestamp: Timestamp in seconds
+> timestamp: Timestamp in seconds，0 means expire immediately
 > VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.
 
 
@@ -226,7 +226,7 @@ Parameter：
 
 > key: The key used to find the TairHash
 > field: An element in TairHash
-> timestamp: Timestamp in seconds
+> timestamp: Timestamp in seconds, 0 means expire immediately
 > VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.
 
 
@@ -377,7 +377,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHINCRBY <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version]   
+> EXHINCRBY <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [KEEPTTL]  
 > [MIN minval] [MAX maxval]  
 > time complexity：O(1)  
 
@@ -397,11 +397,13 @@ Parameter：
 > key: The key used to find the TairHash
 > field: An element in TairHash
 > value: The value to be increased
-> EX: The relative expiration time of the specified field, in seconds, 0 means no expiration
-> EXAT: Specify the absolute expiration time of the field, in seconds, 0 means no expiration 
-> PX: The relative expiration time of the specified field, in milliseconds, 0 means no expiration
-> PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means no expiration
+> EX: The relative expiration time of the specified field, in seconds, 0 means expire immediately
+> EXAT: Specify the absolute expiration time of the field, in seconds, 0 means expire immediately
+> PX: The relative expiration time of the specified field, in milliseconds, 0 means expire immediately
+> PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means expire immediately
 > VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.
+> KEEPTTL: Retain the time to live associated with the field. KEEPTTL cannot be used together with EX/EXAT/PX/PXAT
+
 
 Return：
 
@@ -417,7 +419,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHINCRBYFLOAT <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval]  
+> EXHINCRBYFLOAT <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [KEEPTTL] 
 > time complexity：O(1)  
 
 
@@ -436,12 +438,12 @@ Parameter：
 > key: The key used to find the TairHash
 > field: An element in TairHash
 > value: The value to be increased
-> EX: The relative expiration time of the specified field, in seconds, 0 means no expiration
-> EXAT: Specify the absolute expiration time of the field, in seconds, 0 means no expiration 
-> PX: The relative expiration time of the specified field, in milliseconds, 0 means no expiration
-> PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means no expiration
+> EX: The relative expiration time of the specified field, in seconds, 0 means expire immediately
+> EXAT: Specify the absolute expiration time of the field, in seconds, 0 means expire immediately
+> PX: The relative expiration time of the specified field, in milliseconds, 0 means expire immediately
+> PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means expire immediately
 > VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.
-
+> KEEPTTL: Retain the time to live associated with the field. KEEPTTL cannot be used together with EX/EXAT/PX/PXAT
 
 Return：
 

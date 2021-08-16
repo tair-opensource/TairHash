@@ -1415,7 +1415,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal OK [r exhmsetwithopts tairhashkey field1 val1 4 10 field2 val2 4 10]
         catch {r exhmsetwithopts tairhashkey field1 val1 4 10 field2 val2 4 10} err
         assert_match {*ERR*update*version*is*stale} $err
-        assert_equal OK [r exhmsetwithopts tairhashkey field1 val1 1 0 field2 val2 1 3]
+        assert_equal OK [r exhmsetwithopts tairhashkey field1 val1 1 1000 field2 val2 1 3]
 
         after 1000
         assert_equal "val1 2" [r exhgetwithver tairhashkey field1]
@@ -1430,7 +1430,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         r del tairhashkey
 
         assert_equal OK [r exhmsetwithopts tairhashkey field1 val1 4 10 field2 val2 4 10]
-        assert_equal OK [r exhmsetwithopts tairhashkey field1 val1 1 0 field2 val2 1 2]
+        assert_equal OK [r exhmsetwithopts tairhashkey field1 val1 1 1000 field2 val2 1 2]
 
         after 1000
         assert_equal "val1 2" [r exhgetwithver tairhashkey field1]
@@ -1512,8 +1512,100 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         set res [r exhscan tairhashkey 0 MATCH foo* COUNT 10000]
         lsort -unique [lindex $res 1]
     } {1 10 foo foobar}
-    
 
+     test {Exhset keepttl} {
+        r del exhashkey
+
+        catch {r exhset exhashkey field val ex 3 keepttl} err
+        assert_match {*ERR*syntax*error*} $err
+
+        catch {r exhset exhashkey field val keepttl ex 3} err
+        assert_match {*ERR*syntax*error*} $err
+
+        r del exhashkey
+
+        assert_equal 1 [r exhset exhashkey field val ex 3]
+        assert_equal 0 [r exhset exhashkey field val]
+        assert_equal -1 [r exhttl exhashkey field]
+
+        r del exhashkey
+        
+        assert_equal 1 [r exhset exhashkey field val ex 3]
+        assert_equal 0 [r exhset exhashkey field val keepttl]
+        set ttl [r exhttl exhashkey field]
+        assert {$ttl > 1}
+    }
+
+    test {Exhincrby keepttl} {
+        r del exhashkey
+
+        catch {r exhincrby exhashkey field 1 ex 3 keepttl} err
+        assert_match {*ERR*syntax*error*} $err
+
+        catch {r exhincrby exhashkey field 1 keepttl ex 3} err
+        assert_match {*ERR*syntax*error*} $err
+
+        r del exhashkey
+
+        assert_equal 1 [r exhincrby exhashkey field 1 ex 3]
+        assert_equal 2 [r exhincrby exhashkey field 1]
+        assert_equal -1 [r exhttl exhashkey field]
+
+        r del exhashkey
+        
+        assert_equal 1 [r exhincrby exhashkey field 1 ex 3]
+        assert_equal 2 [r exhincrby exhashkey field 1 keepttl]
+        set ttl [r exhttl exhashkey field]
+        assert {$ttl > 1}
+    }
+
+    test {Exhincrbyfloat keepttl} {
+        r del exhashkey
+
+        catch {r exhincrbyfloat exhashkey field 1 ex 3 keepttl} err
+        assert_match {*ERR*syntax*error*} $err
+
+        catch {r exhincrbyfloat exhashkey field 1 keepttl ex 3} err
+        assert_match {*ERR*syntax*error*} $err
+
+        r del exhashkey
+
+        assert_equal 1 [r exhincrbyfloat exhashkey field 1 ex 3]
+        assert_equal 2 [r exhincrbyfloat exhashkey field 1]
+        assert_equal -1 [r exhttl exhashkey field]
+
+        r del exhashkey
+        
+        assert_equal 1 [r exhincrbyfloat exhashkey field 1 ex 3]
+        assert_equal 2 [r exhincrbyfloat exhashkey field 1 keepttl]
+        set ttl [r exhttl exhashkey field]
+        assert {$ttl > 1}
+    }
+
+    test {Exhash with expire 0} {
+        r del exhashkey
+
+        assert_equal 1 [r exhset exhashkey field val ex 3]
+        assert_equal 1 [r exhexpire exhashkey field 0]
+        assert_equal -3 [r exhttl exhashkey field]
+        assert_equal 0 [r exists exhashkey]
+
+        assert_equal 1 [r exhincrby exhashkey field 1 ex 3]
+        assert_equal 2 [r exhincrby exhashkey field 1 ex 0]
+        assert_equal -3 [r exhttl exhashkey field]
+        assert_equal 0 [r exists exhashkey]
+
+        assert_equal 1 [r exhincrbyfloat exhashkey field 1 ex 3]
+        assert_equal 2 [r exhincrbyfloat exhashkey field 1 ex 0]
+        assert_equal -3 [r exhttl exhashkey field]
+        assert_equal 0 [r exists exhashkey]
+
+        assert_equal 1 [r exhset exhashkey field 1 ex 3]
+        assert_equal 0 [r exhset exhashkey field 1 ex 0]
+        assert_equal -3 [r exhttl exhashkey field]
+        assert_equal 0 [r exists exhashkey]
+    }
+    
     start_server {tags {"tairhash repl"} overrides {bind 0.0.0.0}} {
         r module load $testmodule
         set slave [srv 0 client]

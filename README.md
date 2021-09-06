@@ -20,10 +20,10 @@
 - Every time you read or write a field, it will also trigger the expiration of the field itself
 - All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
-Advantages: higher efficiency of expire elimination    
-Disadvantages: Because the SORT_MODE implementation relies on the `unlink2` callback function (see this [PR](https://github.com/redis/redis/pull/8999))) to release the index structure synchronously, you need to ensure that REDISMODULE_TYPE_METHOD_VERSION in your Redis is not Less than 4.
+**Advantages**: higher efficiency of expire elimination    
+**Disadvantages**: Because the SORT_MODE implementation relies on the `unlink2` callback function (see this [PR](https://github.com/redis/redis/pull/8999))) to release the index structure synchronously, you need to ensure that REDISMODULE_TYPE_METHOD_VERSION in your Redis is not Less than 4.
 
-Usage: cmake with `-DSORT_MODE=yes` option, and recompile
+**Usag**e: cmake with `-DSORT_MODE=yes` option, and recompile
 
 ### SCAN_MODE:
 - Do not sort TairHash globally
@@ -32,10 +32,10 @@ Usage: cmake with `-DSORT_MODE=yes` option, and recompile
 - Every time you read or write a field, it will also trigger the expiration of the field itself
 - All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
-Advantages: can run in the low version of redis (redis 5.x and  redis 6.x)     
-Disadvantages: low efficiency of expire elimination
+**Advantages**: can run in the low version of redis (redis 5.x and  redis 6.x)     
+**Disadvantages**: low efficiency of expire elimination
 
-Usage: cmake with `-DSORT_MODE=no` option, and recompile
+**Usage**: cmake with `-DSORT_MODE=no` option, and recompile
 
 <br/>
 

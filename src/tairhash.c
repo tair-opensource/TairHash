@@ -123,16 +123,12 @@ void _myAssert(const char *estr, const char *file, int line) {
     *((char *)-1) = 'x';
 }
 
-#define ACTIVE_EXPIRE_INSERT(dbid, o, field, expire)                                 \
-    do {                                                                             \
-        REDISMODULE_NOT_USED(dbid);                                                  \
-        if (expire) {                                                                \
-            long long before_min_score = -1;                                         \
-            if (o->expire_index->header->level[0].forward) {                         \
-                before_min_score = o->expire_index->header->level[0].forward->score; \
-            }                                                                        \
-            m_zslInsert(o->expire_index, expire, takeAndRef(field));                 \
-        }                                                                            \
+#define ACTIVE_EXPIRE_INSERT(dbid, o, field, expire)                 \
+    do {                                                             \
+        REDISMODULE_NOT_USED(dbid);                                  \
+        if (expire) {                                                \
+            m_zslInsert(o->expire_index, expire, takeAndRef(field)); \
+        }                                                            \
     } while (0)
 #endif
 
@@ -154,10 +150,6 @@ void _myAssert(const char *estr, const char *file, int line) {
 #define ACTIVE_EXPIRE_UPDATE(dbid, o, field, cur_expire, new_expire)          \
     do {                                                                      \
         if (cur_expire != new_expire) {                                       \
-            long long before_min_score = -1;                                  \
-            m_zskiplistNode *ln = o->expire_index->header->level[0].forward;  \
-            MY_Assert(ln != NULL);                                            \
-            before_min_score = ln->score;                                     \
             m_zslUpdateScore(o->expire_index, cur_expire, field, new_expire); \
         }                                                                     \
     } while (0)
@@ -584,8 +576,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
     }
 
     stat_last_active_expire_time_msec = RedisModule_Milliseconds() - start;
-    stat_max_active_expire_time_msec = stat_max_active_expire_time_msec < stat_last_active_expire_time_msec ? 
-    stat_last_active_expire_time_msec : stat_max_active_expire_time_msec;
+    stat_max_active_expire_time_msec = stat_max_active_expire_time_msec < stat_last_active_expire_time_msec ? stat_last_active_expire_time_msec : stat_max_active_expire_time_msec;
     total_expire_time += stat_last_active_expire_time_msec;
     ++loop_cnt;
     if (loop_cnt % 1000 == 0) {
@@ -1782,9 +1773,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         }
     }
 
-    if ((incr < 0 && cur_val < 0 && incr < (LLONG_MIN - cur_val)) || 
-        (incr > 0 && cur_val > 0 && incr > (LLONG_MAX - cur_val)) || 
-        (max_p != NULL && cur_val + incr > max) || (min_p != NULL && cur_val + incr < min)) {
+    if ((incr < 0 && cur_val < 0 && incr < (LLONG_MIN - cur_val)) || (incr > 0 && cur_val > 0 && incr > (LLONG_MAX - cur_val)) || (max_p != NULL && cur_val + incr > max) || (min_p != NULL && cur_val + incr < min)) {
         if (nokey) {
             tairHashValRelease(tair_hash_val);
         }
@@ -1838,8 +1827,8 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     }
 
     if (milliseconds > 0) {
-        RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], tair_hash_val->value, "abs", 
-            tair_hash_val->version, "pxat", (milliseconds + RedisModule_Milliseconds()));
+        RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], tair_hash_val->value, "abs",
+                              tair_hash_val->version, "pxat", (milliseconds + RedisModule_Milliseconds()));
     } else {
         RedisModule_Replicate(ctx, "EXHSET", "ssscl", argv[1], argv[2], tair_hash_val->value, "abs", tair_hash_val->version);
     }
@@ -2073,8 +2062,8 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
     }
 
     if (milliseconds > 0) {
-        RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], tair_hash_val->value, "abs", tair_hash_val->version, "pxat", 
-            (milliseconds + RedisModule_Milliseconds()));
+        RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], tair_hash_val->value, "abs", tair_hash_val->version, "pxat",
+                              (milliseconds + RedisModule_Milliseconds()));
     } else {
         RedisModule_Replicate(ctx, "EXHSET", "ssscl", argv[1], argv[2], tair_hash_val->value, "abs", tair_hash_val->version);
     }
@@ -2324,9 +2313,11 @@ int TairHashTypeHdel_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         if (de) {
             tair_hash_val = dictGetVal(de);
             if (tair_hash_val->expire > 0) {
+#ifdef SORT_MODE
                 long long before_min_score, after_min_score;
                 MY_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
                 before_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
+#endif
                 m_zslDelete(tair_hash_obj->expire_index, tair_hash_val->expire, argv[j], NULL);
 #ifdef SORT_MODE
                 if (tair_hash_obj->expire_index->header->level[0].forward) {
@@ -2441,8 +2432,10 @@ int TairHashTypeHdelWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString 
         if (tair_hash_val != NULL) {
             if (ver == 0 || ver == tair_hash_val->version) {
                 if (tair_hash_val->expire > 0) {
+#ifdef SORT_MODE
                     MY_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
                     before_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
+#endif
                     m_zslDelete(tair_hash_obj->expire_index, tair_hash_val->expire, argv[j], NULL);
 #ifdef SORT_MODE
                     if (tair_hash_obj->expire_index->header->level[0].forward) {
@@ -2666,8 +2659,8 @@ int TairHashTypeHkeys_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     di = m_dictGetSafeIterator(tair_hash_obj->hash);
     while ((de = m_dictNext(di)) != NULL) {
         skey = (RedisModuleString *)dictGetKey(de);
-        data = (TairHashVal *)dictGetVal(de);
 #ifdef SORT_MODE
+        data = (TairHashVal *)dictGetVal(de);
         if (isExpire(data->expire)) {
             continue;
         }
@@ -2731,13 +2724,13 @@ int TairHashTypeHvals_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     RedisModule_ReplyWithArray(ctx, REDISMODULE_POSTPONED_ARRAY_LEN);
     di = m_dictGetSafeIterator(tair_hash_obj->hash);
     while ((de = m_dictNext(di)) != NULL) {
-        skey = (RedisModuleString *)dictGetKey(de);
         data = (TairHashVal *)dictGetVal(de);
 #ifdef SORT_MODE
         if (isExpire(data->expire)) {
             continue;
         }
 #else
+        skey = (RedisModuleString *)dictGetKey(de);
         if (expireTairHashObjIfNeeded(ctx, argv[1], tair_hash_obj, skey, 0)) {
             continue;
         }

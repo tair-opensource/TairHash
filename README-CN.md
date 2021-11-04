@@ -91,7 +91,9 @@ cmake ../ && make -j
 ```
 编译成功后会在lib目录下产生tairhash_module.so库文件
 
- ./redis-server --loadmodule /path/to/tairhash_module.so
+```
+./redis-server --loadmodule /path/to/tairhash_module.so
+```  
 ## 测试方法
 
 1. 修改`tests`目录下tairhash.tcl文件中的路径为`set testmodule [file your_path/tairhash_module.so]`

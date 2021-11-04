@@ -90,7 +90,9 @@ cmake ../ && make -j
 ```
 then the tairhash_module.so library file will be generated in the lib directory
 
- ./redis-server --loadmodule /path/to/tairhash_module.so   
+```
+./redis-server --loadmodule /path/to/tairhash_module.so
+```  
 ## TEST
 
 1. Modify the path in the tairhash.tcl file in the `tests` directory to `set testmodule [file your_path/tairhash_module.so]`

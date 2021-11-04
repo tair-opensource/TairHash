@@ -496,14 +496,18 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
                         MY_Assert(RedisModule_CallReplyType(key_reply) == REDISMODULE_REPLY_STRING);
                         key = RedisModule_CreateStringFromCallReply(key_reply);
                         real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ);
-                        MY_Assert(RedisModule_KeyType(real_key) != REDISMODULE_KEYTYPE_EMPTY);
+                        /* Since RedisModule_KeyType does not deal with the stream type, it is possible to 
+                           return REDISMODULE_KEYTYPE_EMPTY here, so we must deal with it until after this 
+                           bugfix: https://github.com/redis/redis/commit/1833d008b3af8628835b5f082c5b4b1359557893 */
+                        if (RedisModule_KeyType(real_key) == REDISMODULE_KEYTYPE_EMPTY) {
+                            continue;
+                        }
                         if (RedisModule_ModuleTypeGetType(real_key) == TairHashType) {
                             tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
                             if (tair_hash_obj->expire_index->length > 0) {
                                 m_listAddNodeTail(keys, key);
                             }
                         }
-                        RedisModule_CloseKey(real_key);
                     }
                     break;
                 }

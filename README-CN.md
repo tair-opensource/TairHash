@@ -107,7 +107,7 @@ cmake ../ && make -j
 
 ## 我们的modules
 
-[TairHash]([url地址](https://github.com/alibaba/TairHash)): 和redis hash类似，但是可以为field设置expire和version，支持高效的主动过期和被动过期   
+[TairHash](https://github.com/alibaba/TairHash): 和redis hash类似，但是可以为field设置expire和version，支持高效的主动过期和被动过期   
 [TairZset](https://github.com/alibaba/TairZset): 和redis zset类似，但是支持多（最大255）维排序，同时支持incrby语义，非常适合游戏排行榜场景   
 [TairString](https://github.com/alibaba/TairString): 和redis string类似，但是支持设置expire和version，并提供CAS/CAD等实用命令，非常适用于分布式锁等场景  
 

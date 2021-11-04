@@ -90,6 +90,7 @@ cmake ../ && make -j
 ```
 then the tairhash_module.so library file will be generated in the lib directory
 
+ ./redis-server --loadmodule /path/to/tairhash_module.so   
 ## TEST
 
 1. Modify the path in the tairhash.tcl file in the `tests` directory to `set testmodule [file your_path/tairhash_module.so]`
@@ -102,3 +103,9 @@ then the tairhash_module.so library file will be generated in the lib directory
 
 ## API
 [Reference](CMDDOC.md)
+
+
+### Our modules
+[TairHash]([url地址](https://github.com/alibaba/TairHash)): A redis module, similar to redis hash, but you can set expire and version for the field  
+[TairZset](https://github.com/alibaba/TairZset): A redis module, similar to redis zset, but you can set multiple scores for each member to support multi-dimensional sorting  
+[TairString](https://github.com/alibaba/TairString): A redis module, similar to redis string, but you can set expire and version for the value. It also provides many very useful commands, such as cas/cad, etc.  

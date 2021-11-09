@@ -786,7 +786,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHSCAN <key> <op> <subkey> [MATCH pattern] [COUNT count]  
+> EXHSCAN key cursor [MATCH pattern] [COUNT count]    
 > time complexity：O(1)、O(N)  
 
 
@@ -794,26 +794,24 @@ Grammar and complexity：
 Command Description：
 
 
-> Scan the TairHash specified by the key, the scanning mode op can be >, >=, <, <=, ==, ^, $, and the result set can be filtered according to the pattern specified by MATCH while scanning, and the COUNT pair list can also be used The number of scans is limited. If not specified, the default value is 10. The SCAN/HSCAN of TairHash and Redis Yunsheng Hash are not the same. It does not have the concept of cursor. On the contrary, users can use subkey to directly locate the starting position of the scan. Compared with the cursor which is meaningless to business, subkey is more business-friendly . At the same time, the native Redis Hash scanning algorithm may return a large number of scanned fields when rehashing, but TaiHash does not have this problem. During the asymptotic scanning process, regardless of whether the field in TaiHash increases or decreases, the scanned fields are already scanned. The field will never be scanned and returned again.
+> Scan the TairHash specified by the key.
 
 
 Parameter：
 
 
-> key: The key used to find the TairHash
-> op: Used to locate the starting point of the scan, which can be:> (start from the first field greater than subkey), >= (start from the first field position greater than or equal to subkey), <(start from the first field less than subkey ), <= (start from the first field less than or equal to subkey), == (start from the first field equal to subkey), ^ (start from the first field), \$ (start from the last field)   
-> subkey: The key used to search for the starting position of the scan. When op is ^ or $, the value will be ignored
-> MATCH: Rules for filtering scan results
-> COUNT: It is used to specify the number of fields in a single scan. Note that COUNT only represents the number of feilds of TairHash scanned each time. It does not mean that COUNT field result sets will be returned in the end. The size of the result set depends on the current fields in TaiHash. The number and whether to specify MATCH for filtering depends. The default value of COUNT is 10
+> key: The key used to find the TairHash   
+> cursor: Scan cursor, starting from 0, after each scan, it will return to the next scan cursor, until it returns 0 to indicate the end of the scan    
+> MATCH: Rules for filtering scan results   
+> COUNT: It is used to specify the number of fields in a single scan. Note that COUNT only represents the number of feilds of TairHash scanned each time. It does not mean that COUNT field result sets will be returned in the end. The size of the result set depends on the current fields in TaiHash. The number and whether to specify MATCH for filtering depends. The default value of COUNT is 10   
 
 
 
 Return：
 
 
-> Returns an array with two elements. The first element of the array is a string, which represents the next field to be scanned after the end of this scan. If there is no field to scan after the end of this scan, then the element is empty String. The second array element is still an array, and the array contains all the field/values that are iterated this time. If an empty TairHash is found or TairHash does not exist, then both array elements are empty. 
+> Returns an array with two elements. The first element of the array is the cursor to be used in the next scan, and 0 means the end of the entire scan. The second array element is still an array, and the array contains all the field/values that are iterated this time. If an empty TairHash is found or TairHash does not exist, then both array elements are empty. 
  
-
 
 
 **example：**
@@ -821,31 +819,34 @@ Return：
 ```
 127.0.0.1:6379> exhmset exhashkey field1 val1 field2 val2 field3 val3 field4 val4 field5 val5 field6 val6 field7 val7 field8 val8 field9 val9
 OK
-127.0.0.1:6379> exhscan exhashkey ^ xxx COUNT 3
-1) "field4"
-2) 1) "field1"
-   2) "val1"
+127.0.0.1:6379> exhscan exhashkey 0 COUNT 3
+1) (integer) 4
+2) 1) "field6"
+   1) "val6"
+   2) "field5"
+   3) "val5"
+127.0.0.1:6379> exhscan exhashkey 4 COUNT 3
+1) (integer) 1
+2) 1) "field8"
+   2) "val8"
    3) "field2"
    4) "val2"
-   5) "field3"
-   6) "val3"
-127.0.0.1:6379> exhscan exhashkey >= field4 COUNT 3
-1) "field7"
-2) 1) "field4"
-   2) "val4"
-   3) "field5"
-   4) "val5"
-   5) "field6"
-   6) "val6"
-127.0.0.1:6379> exhscan exhashkey >= field7 COUNT 3
-1)
-2) 1) "field7"
-   2) "val7"
-   3) "field8"
-   4) "val8"
-   5) "field9"
-   6) "val9"
-127.0.0.1:6379>
+127.0.0.1:6379> exhscan exhashkey 1 COUNT 3
+1) (integer) 13
+2) 1) "field9"
+   2) "val9"
+   3) "field7"
+   4) "val7"
+127.0.0.1:6379> exhscan exhashkey 13 COUNT 3
+1) (integer) 11
+2) 1) "field3"
+   2) "val3"
+   3) "field4"
+   4) "val4"
+127.0.0.1:6379> exhscan exhashkey 11 COUNT 3
+1) (integer) 0
+2) 1) "field1"
+   2) "val1"
 ```
 
 2、How to use MATCH to filter the result set
@@ -855,22 +856,25 @@ Exact match：
 ```
 127.0.0.1:6379> exhmset exhashkey field1_1 val1_1 field1_2 val1_2 field1_3 val1_3 field1_4 val1_4 field1_5 val1_5 field2_1 val2_1 field2_2 val2_2 field2_3 val2_3 field6_1 val6_1 field6_2 val6_2 field6_3 val6_3 field6_4 val6_4 field8_1 val8_1 field8_2 val8_4
 OK
-127.0.0.1:6379> exhscan exhashkey ^ xxx COUNT 3 MATCH field1_1
-1) "field1_4"
+127.0.0.1:6379> exhscan exhashkey 0 COUNT 3 MATCH field1_1
+1) (integer) 8
+2) (empty array)
+127.0.0.1:6379> exhscan exhashkey 8 COUNT 3 MATCH field1_1
+1) (integer) 12
+2) (empty array)
+127.0.0.1:6379> exhscan exhashkey 12 COUNT 3 MATCH field1_1
+1) (integer) 9
 2) 1) "field1_1"
    2) "val1_1"
-127.0.0.1:6379> exhscan exhashkey >= field1_4 COUNT 3 MATCH field1_1
-1) "field2_2"
-2) (empty list or set)
-127.0.0.1:6379> exhscan exhashkey >= field2_2 COUNT 3 MATCH field1_1
-1) "field6_2"
-2) (empty list or set)
-127.0.0.1:6379> exhscan exhashkey >= field6_2 COUNT 3 MATCH field1_1
-1) "field8_1"
-2) (empty list or set)
-127.0.0.1:6379> exhscan exhashkey >= field8_1 COUNT 3 MATCH field1_1
-1)
-2) (empty list or set)
+127.0.0.1:6379> exhscan exhashkey 9 COUNT 3 MATCH field1_1
+1) (integer) 5
+2) (empty array)
+127.0.0.1:6379> exhscan exhashkey 5 COUNT 3 MATCH field1_1
+1) (integer) 11
+2) (empty array)
+127.0.0.1:6379> exhscan exhashkey 11 COUNT 3 MATCH field1_1
+1) (integer) 0
+2) (empty array)
 ```
 
 
@@ -879,27 +883,29 @@ Fuzzy matching：
 ```
 127.0.0.1:6379> exhmset exhashkey field1_1 val1_1 field1_2 val1_2 field1_3 val1_3 field1_4 val1_4 field1_5 val1_5 field2_1 val2_1 field2_2 val2_2 field2_3 val2_3 field6_1 val6_1 field6_2 val6_2 field6_3 val6_3 field6_4 val6_4 field8_1 val8_1 field8_2 val8_4
 OK
-127.0.0.1:6379> exhscan exhashkey ^ xxx COUNT 3 MATCH field6_*
-1) "field1_4"
-2) (empty list or set)
-127.0.0.1:6379> exhscan exhashkey >= field1_4 COUNT 3 MATCH field6_*
-1) "field2_2"
-2) (empty list or set)
-127.0.0.1:6379> exhscan exhashkey >= field2_2 COUNT 3 MATCH field6_*
-1) "field6_2"
-2) 1) "field6_1"
-   2) "val6_1"
-127.0.0.1:6379> exhscan exhashkey >= field6_2 COUNT 3 MATCH field6_*
-1) "field8_1"
+127.0.0.1:6379> exhscan exhashkey 0 COUNT 3 MATCH field6_*
+1) (integer) 8
+2) 1) "field6_4"
+   2) "val6_4"
+   3) "field6_1"
+   4) "val6_1"
+127.0.0.1:6379> exhscan exhashkey 8 COUNT 3 MATCH field6_*
+1) (integer) 12
 2) 1) "field6_2"
    2) "val6_2"
-   3) "field6_3"
-   4) "val6_3"
-   5) "field6_4"
-   6) "val6_4"
-127.0.0.1:6379> exhscan exhashkey >= field8_1 COUNT 3 MATCH field6_*
-1)
-2) (empty list or set)
+127.0.0.1:6379> exhscan exhashkey 12 COUNT 3 MATCH field6_*
+1) (integer) 9
+2) (empty array)
+127.0.0.1:6379> exhscan exhashkey 9 COUNT 3 MATCH field6_*
+1) (integer) 5
+2) (empty array)
+127.0.0.1:6379> exhscan exhashkey 5 COUNT 3 MATCH field6_*
+1) (integer) 11
+2) 1) "field6_3"
+   2) "val6_3"
+127.0.0.1:6379> exhscan exhashkey 11 COUNT 3 MATCH field6_*
+1) (integer) 0
+2) (empty array)
 ```
 
 <br/>

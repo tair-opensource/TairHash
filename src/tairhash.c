@@ -2881,7 +2881,7 @@ int TairHashTypeHscan_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     tairHashObj *tair_hash_obj = NULL;
     if (type == REDISMODULE_KEYTYPE_EMPTY) {
         RedisModule_ReplyWithArray(ctx, 2);
-        RedisModule_ReplyWithLongLong(ctx, 0);
+        RedisModule_ReplyWithSimpleString(ctx, "0");
         RedisModule_ReplyWithArray(ctx, 0);
         return REDISMODULE_OK;
     } else {
@@ -2940,7 +2940,7 @@ int TairHashTypeHscan_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
 
     /* Step 4: Reply to the client. */
     RedisModule_ReplyWithArray(ctx, 2);
-    RedisModule_ReplyWithLongLong(ctx, cursor);
+    RedisModule_ReplyWithString(ctx, RedisModule_CreateStringFromLongLong(ctx, cursor));
 
     RedisModule_ReplyWithArray(ctx, listLength(keys));
     while ((node = listFirst(keys)) != NULL) {

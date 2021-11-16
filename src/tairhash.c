@@ -495,7 +495,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
                         RedisModuleCallReply *key_reply = RedisModule_CallReplyArrayElement(keys_reply, j);
                         MY_Assert(RedisModule_CallReplyType(key_reply) == REDISMODULE_REPLY_STRING);
                         key = RedisModule_CreateStringFromCallReply(key_reply);
-                        real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ);
+                        real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_OPEN_KEY_NOTOUCH);
                         /* Since RedisModule_KeyType does not deal with the stream type, it is possible to 
                            return REDISMODULE_KEYTYPE_EMPTY here, so we must deal with it until after this 
                            bugfix: https://github.com/redis/redis/commit/1833d008b3af8628835b5f082c5b4b1359557893 */
@@ -529,7 +529,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
         m_listNode *node;
         while ((node = listFirst(keys)) != NULL) {
             key = listNodeValue(node);
-            real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE);
+            real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE | REDISMODULE_OPEN_KEY_NOTOUCH);
             int type = RedisModule_KeyType(real_key);
             if (type != REDISMODULE_KEYTYPE_EMPTY) {
                 MY_Assert(RedisModule_ModuleTypeGetType(real_key) == TairHashType);

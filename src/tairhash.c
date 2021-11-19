@@ -1376,8 +1376,7 @@ int TairHashTypeHmset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     return REDISMODULE_OK;
 }
 
-/* EXHMSETWITHOPTS tairHashkey field1 val1 ver1 expire1 [field2 val2 ver2 expire2 ...] */
-int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+int HmsetWithOptsGeneric(RedisModuleCtx *ctx, RedisModuleString **argv, int argc, long long basetime, int unit, int abs_version) {
     RedisModule_AutoMemory(ctx);
 
     if (((argc - 2) % 4) != 0) {
@@ -1424,8 +1423,9 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
         }
 
         expireTairHashObjIfNeeded(ctx, argv[1], tair_hash_obj, argv[i], 0);
+
         TairHashVal *tair_hash_val = (TairHashVal *)m_dictFetchValue(tair_hash_obj->hash, argv[i]);
-        if (tair_hash_val == NULL || ver == 0 || tair_hash_val->version == ver) {
+        if (abs_version == 1 || tair_hash_val == NULL || ver == 0 || tair_hash_val->version == ver) {
             continue;
         } else {
             RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION);
@@ -1437,10 +1437,8 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
     RedisModuleString **v = RedisModule_Alloc(sizeof(RedisModuleString *) * 7);
 
     for (int i = 2; i < argc; i += 4) {
-        if (RedisModule_StringToLongLong(argv[i + 3], &when) != REDISMODULE_OK) {
-            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
-            return REDISMODULE_ERR;
-        }
+        RedisModule_StringToLongLong(argv[i + 3], &when);
+        RedisModule_StringToLongLong(argv[i + 2], &ver);
 
         TairHashVal *tair_hash_val = (TairHashVal *)m_dictFetchValue(tair_hash_obj->hash, argv[i]);
         if (tair_hash_val == NULL) {
@@ -1458,16 +1456,27 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
         }
 
         tair_hash_val->value = takeAndRef(argv[i + 1]);
-        tair_hash_val->version++;
+        if (abs_version) {
+            tair_hash_val->version = ver;
+        } else {
+            tair_hash_val->version++;
+        }
 
         int dbid = RedisModule_GetSelectedDb(ctx);
-        when = RedisModule_Milliseconds() + when * 1000;
-        if (nokey || tair_hash_val->expire == 0) {
-            ACTIVE_EXPIRE_INSERT(dbid, tair_hash_obj, argv[i], when);
-        } else {
-            ACTIVE_EXPIRE_UPDATE(dbid, tair_hash_obj, argv[i], tair_hash_val->expire, when);
+
+        if (unit == UNIT_SECONDS) {
+            when *= 1000;
         }
-        tair_hash_val->expire = when;
+
+        if (when) {
+            when = basetime + when;
+            if (nokey || tair_hash_val->expire == 0) {
+                ACTIVE_EXPIRE_INSERT(dbid, tair_hash_obj, argv[i], when);
+            } else {
+                ACTIVE_EXPIRE_UPDATE(dbid, tair_hash_obj, argv[i], tair_hash_val->expire, when);
+            }
+            tair_hash_val->expire = when;
+        }
 
         if (nokey) {
             m_dictAdd(tair_hash_obj->hash, takeAndRef(argv[i]), tair_hash_val);
@@ -1487,6 +1496,16 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
     RedisModule_Free(v);
     RedisModule_ReplyWithSimpleString(ctx, "OK");
     return REDISMODULE_OK;
+}
+
+/*  EXHMSETWITHOPTSABS <key> <field> <version> <milliseconds-timestamp>*/
+int TairHashTypeHmsetWithOptsAbs_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    return HmsetWithOptsGeneric(ctx, argv, argc, 0, UNIT_MILLISECONDS, 1);
+}
+
+/*  EXHMSETWITHOPTS <key> <field> <version> <milliseconds> [<key> <field> <version> <milliseconds>] */
+int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    return HmsetWithOptsGeneric(ctx, argv, argc, RedisModule_Milliseconds(), UNIT_SECONDS, 0);
 }
 
 /*  EXHPEXPIREAT <key> <field> <milliseconds-timestamp> [ VER version | ABS version ]*/
@@ -3071,14 +3090,18 @@ void TairHashTypeRdbSave(RedisModuleIO *rdb, void *value) {
     }
 }
 
+#define AOF_REWRITE_ITEMS_PER_CMD 64
 void TairHashTypeAofRewrite(RedisModuleIO *aof, RedisModuleString *key, void *value) {
     tairHashObj *o = (tairHashObj *)value;
     RedisModuleString *skey;
 
+    long long count = 0, i;
+    size_t array_size = 0;
+    RedisModuleString **rewrite_array = RedisModule_Calloc(AOF_REWRITE_ITEMS_PER_CMD * 4, sizeof(RedisModuleString *));
+
     m_dictIterator *di;
     m_dictEntry *de;
 
-    // TODO: rewrite to exhmset for big tairhash
     if (o->hash) {
         di = m_dictGetIterator(o->hash);
         while ((de = m_dictNext(di)) != NULL) {
@@ -3089,12 +3112,36 @@ void TairHashTypeAofRewrite(RedisModuleIO *aof, RedisModuleString *key, void *va
                     /* For expired field, we do not REWRITE it. */
                     continue;
                 }
-                RedisModule_EmitAOF(aof, "EXHSET", "sssclcl", key, skey, val->value, "PXAT", val->expire, "ABS", val->version);
-            } else {
-                RedisModule_EmitAOF(aof, "EXHSET", "ssscl", key, skey, val->value, "ABS", val->version);
+            }
+
+            rewrite_array[array_size++] = RedisModule_CreateStringFromString(NULL, skey);
+            rewrite_array[array_size++] = RedisModule_CreateStringFromString(NULL, val->value);
+            rewrite_array[array_size++] = RedisModule_CreateStringFromLongLong(NULL, val->version);
+            rewrite_array[array_size++] = RedisModule_CreateStringFromLongLong(NULL, val->expire);
+
+            if (++count == AOF_REWRITE_ITEMS_PER_CMD) {
+                RedisModule_EmitAOF(aof, "exhmsetwithoptsabs", "sv", key, rewrite_array, array_size);
+
+                for (i = 0; i < array_size; i++) {
+                    RedisModule_FreeString(NULL, rewrite_array[i]);
+                    rewrite_array[i] = NULL;
+                }
+
+                count = 0;
+                array_size = 0;
             }
         }
         m_dictReleaseIterator(di);
+
+        if (rewrite_array) {
+            RedisModule_EmitAOF(aof, "exhmsetwithoptsabs", "sv", key, rewrite_array, array_size);
+            for (i = 0; i < array_size; i++) {
+                RedisModule_FreeString(NULL, rewrite_array[i]);
+                rewrite_array[i] = NULL;
+            }
+        }
+
+        RedisModule_Free(rewrite_array);
     }
 }
 
@@ -3235,7 +3282,6 @@ int Module_CreateCommands(RedisModuleCtx *ctx) {
 #define CREATE_WRMCMD(name, tgt, firstkey, lastkey, keystep) CREATE_CMD(name, tgt, "write deny-oom", firstkey, lastkey, keystep);
 #define CREATE_ROMCMD(name, tgt, firstkey, lastkey, keystep) CREATE_CMD(name, tgt, "readonly fast", firstkey, lastkey, keystep);
 
-
     /* write cmds */
     CREATE_WRCMD("exhset", TairHashTypeHset_RedisCommand)
     CREATE_WRCMD("exhdel", TairHashTypeHdel_RedisCommand)
@@ -3246,6 +3292,7 @@ int Module_CreateCommands(RedisModuleCtx *ctx) {
     CREATE_WRCMD("exhsetnx", TairHashTypeHsetNx_RedisCommand)
     CREATE_WRCMD("exhmset", TairHashTypeHmset_RedisCommand)
     CREATE_WRCMD("exhmsetwithopts", TairHashTypeHmsetWithOpts_RedisCommand)
+    CREATE_WRCMD("exhmsetwithoptsabs", TairHashTypeHmsetWithOptsAbs_RedisCommand)
     CREATE_WRCMD("exhsetver", TairHashTypeHsetVer_RedisCommand)
     CREATE_WRCMD("exhexpire", TairHashTypeHexpire_RedisCommand)
     CREATE_WRCMD("exhexpireat", TairHashTypeHexpireAt_RedisCommand)

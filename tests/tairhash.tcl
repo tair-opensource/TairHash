@@ -1336,6 +1336,24 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal 1 $ret_ver
     }
 
+    test {tairhash aof multi rewrite} {
+        r del tairhashkey
+        set count 1000
+        set elements {}
+        for {set j 0} {$j < $count} {incr j} {
+            lappend elements key:$j $j
+        }
+        r exhmset tairhashkey {*}$elements
+
+        assert_equal 1000 [r exhlen tairhashkey]
+
+        r bgrewriteaof
+        waitForBgrewriteaof r
+        r debug loadaof
+
+        assert_equal 1000 [r exhlen tairhashkey]
+    }
+
     test {tairhash type} {
         r del tairhashkey
 

@@ -508,6 +508,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
                                 m_listAddNodeTail(keys, key);
                             }
                         }
+                        RedisModule_CloseKey(real_key);
                     }
                     break;
                 }
@@ -540,6 +541,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
             }
 
             tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
+            RedisModule_CloseKey(real_key);
 
             zsl_len = tair_hash_obj->expire_index->length;
             MY_Assert(zsl_len > 0);

@@ -3222,15 +3222,19 @@ void TairHashTypeDigest(RedisModuleDigest *md, void *value) {
 }
 
 int Module_CreateCommands(RedisModuleCtx *ctx) {
-#define CREATE_CMD(name, tgt, attr)                                                       \
-    do {                                                                                  \
-        if (RedisModule_CreateCommand(ctx, name, tgt, attr, 1, 1, 1) != REDISMODULE_OK) { \
-            return REDISMODULE_ERR;                                                       \
-        }                                                                                 \
+#define CREATE_CMD(name, tgt, attr, firstkey, lastkey, keystep)                                              \
+    do {                                                                                                     \
+        if (RedisModule_CreateCommand(ctx, name, tgt, attr, firstkey, lastkey, keystep) != REDISMODULE_OK) { \
+            RedisModule_Log(ctx, "notice", "reg cmd error");                                                 \
+            return REDISMODULE_ERR;                                                                          \
+        }                                                                                                    \
     } while (0);
 
-#define CREATE_WRCMD(name, tgt) CREATE_CMD(name, tgt, "write deny-oom")
-#define CREATE_ROCMD(name, tgt) CREATE_CMD(name, tgt, "readonly fast")
+#define CREATE_WRCMD(name, tgt) CREATE_CMD(name, tgt, "write deny-oom", 1, 1, 1);
+#define CREATE_ROCMD(name, tgt) CREATE_CMD(name, tgt, "readonly fast", 1, 1, 1);
+#define CREATE_WRMCMD(name, tgt, firstkey, lastkey, keystep) CREATE_CMD(name, tgt, "write deny-oom", firstkey, lastkey, keystep);
+#define CREATE_ROMCMD(name, tgt, firstkey, lastkey, keystep) CREATE_CMD(name, tgt, "readonly fast", firstkey, lastkey, keystep);
+
 
     /* write cmds */
     CREATE_WRCMD("exhset", TairHashTypeHset_RedisCommand)
@@ -3263,7 +3267,7 @@ int Module_CreateCommands(RedisModuleCtx *ctx) {
     CREATE_ROCMD("exhttl", TairHashTypeHttl_RedisCommand)
     CREATE_ROCMD("exhpttl", TairHashTypeHpttl_RedisCommand)
     CREATE_ROCMD("exhgetwithver", TairHashTypeHgetWithVer_RedisCommand)
-    CREATE_ROCMD("exhexpireinfo", TairHashTypeActiveExpireInfo_RedisCommand)
+    CREATE_ROMCMD("exhexpireinfo", TairHashTypeActiveExpireInfo_RedisCommand, 0, 0, 0)
 
     return REDISMODULE_OK;
 }

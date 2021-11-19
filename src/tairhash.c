@@ -3345,6 +3345,10 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
 #endif
 
     if (enable_active_expire) {
+        /* Here we can't directly use the 'ctx' passed by OnLoad, because 
+         * in some old version redis `CreateTimer` will trigger a crash, see bugfix: 
+         * https://github.com/redis/redis/commit/096592506ef3f548a4a3484d5829e04749a24a99
+         * https://github.com/redis/redis/commit/7b5f4b175b96dca2093dc1898c3df97e3e096526 */
         RedisModuleCtx *ctx2 = RedisModule_GetThreadSafeContext(NULL);
         startExpireTimer(ctx2, NULL);
         RedisModule_FreeThreadSafeContext(ctx2);

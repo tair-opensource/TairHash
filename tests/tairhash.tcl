@@ -4,16 +4,16 @@ set testmodule [file normalize your_path/tairhash_module.so]
 start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
     r module load $testmodule
 
-    proc create_big_tairhash {key iterm} {
+    proc create_big_tairhash {key item} {
         r del $key
-        for {set j 0} {$j < $iterm} {incr j} {
+        for {set j 0} {$j < $item} {incr j} {
             r exhset $key $j $j
         }
     }
 
-    proc create_big_tairhash_with_expire {key iterm expire} {
+    proc create_big_tairhash_with_expire {key item expire} {
         r del $key
-        for {set j 0} {$j < $iterm} {incr j} {
+        for {set j 0} {$j < $item} {incr j} {
             r exhset $key $j $j ex $expire
         }
     }

@@ -374,6 +374,7 @@ int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModu
                    https://github.com/redis/redis/pull/8097 
                    https://github.com/redis/redis/pull/7037
      */
+    RedisModule_CloseKey(key);
     RedisModuleCtx *ctx2 = RedisModule_GetThreadSafeContext(NULL);
     RedisModule_SelectDb(ctx2, RedisModule_GetSelectedDb(ctx));
     RedisModuleCallReply *reply = RedisModule_Call(ctx2, "DEL", "s!", raw_key);
@@ -508,6 +509,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
                                 m_listAddNodeTail(keys, key);
                             }
                         }
+                        RedisModule_CloseKey(real_key);
                     }
                     break;
                 }

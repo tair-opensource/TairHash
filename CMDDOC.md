@@ -6,7 +6,7 @@
 Grammar and complexity：
 
 
-> EXHSET <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS version] [KEEPTTL]   
+> EXHSET key field value [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS version] [KEEPTTL]   
 > time complexity：O(1)   
 
 Command Description：  
@@ -36,7 +36,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHGET <key> <field>  
+> EXHGET key field  
 > time complexity：O(1)   
 
 
@@ -69,7 +69,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHMSET <key> <field> <value> [field value...]     
+> EXHMSET key field value [field value...]     
 > time complexity：O(n)     
 
 
@@ -103,7 +103,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHPEXPIREAT <key> <field> <milliseconds-timestamp> [VER/ABS version]   
+> EXHPEXPIREAT key field milliseconds-timestamp [VER/ABS version]   
 > time complexity: (1)     
 
 
@@ -138,7 +138,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHPEXPIRE <key> <field> <milliseconds> [VER/ABS version]    
+> EXHPEXPIRE key field milliseconds [VER/ABS version]    
 > time complexity：O(1)  
 
 
@@ -175,7 +175,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHEXPIREAT <key> <field> <timestamp> [VER/ABS version]   
+> EXHEXPIREAT key field timestamp [VER/ABS version]   
 > time complexity：O(1)     
 
 
@@ -209,7 +209,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHEXPIRE <key> <field> <seconds> [VER/ABS version]     
+> EXHEXPIRE key field seconds [VER/ABS version]     
 > time complexity：O(1)     
 
 
@@ -245,7 +245,7 @@ Return：
 Grammar and complexity:   
 
 
-> EXHPTTL <key> <field>       
+> EXHPTTL key field       
 > time complexity：O(1)     
 
 
@@ -277,7 +277,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHTTL <key> <field>     
+> EXHTTL key field     
 > time complexity：O(1)     
 
 
@@ -310,7 +310,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHVER <key> <field>     
+> EXHVER key field     
 > time complexity：O(1)     
 
 
@@ -333,7 +333,7 @@ Parameter：
 Return：
 
 
-> 成功：Returns -1 when TairHash does not exist, returns -2 when the field does not exist, otherwise returns the field version number
+> Returns -1 when TairHash does not exist, returns -2 when the field does not exist, otherwise returns the field version number
 
 
 #### EXHSETVER
@@ -342,7 +342,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHSETVER <key> <field> <version>     
+> EXHSETVER key field version     
 > time complexity：O(1)     
 
 
@@ -377,8 +377,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHINCRBY <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [KEEPTTL]     
-> [MIN minval] [MAX maxval]     
+> EXHINCRBY key field value [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [KEEPTTL]    
 > time complexity：O(1)     
 
 
@@ -402,6 +401,7 @@ Parameter：
 > PX: The relative expiration time of the specified field, in milliseconds, 0 means expire immediately  
 > PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means expire immediately  
 > VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field  
+> MAX/MIN: Specify the boundary, incr will be executed only when the value of the field is still on this boundary after this incr operation,otherwise an overflow error will be returned   
 > KEEPTTL: Retain the time to live associated with the field. KEEPTTL cannot be used together with EX/EXAT/PX/PXAT
 
 
@@ -419,7 +419,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHINCRBYFLOAT <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [KEEPTTL]    
+> EXHINCRBYFLOAT key field value [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [KEEPTTL]    
 > time complexity：O(1)     
 
 
@@ -443,6 +443,7 @@ Parameter：
 > PX: The relative expiration time of the specified field, in milliseconds, 0 means expire immediately  
 > PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means expire immediately  
 > VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field  
+> MAX/MIN: Specify the boundary, incr will be executed only when the value of the field is still on this boundary after this incr operation,otherwise an overflow error will be returned   
 > KEEPTTL: Retain the time to live associated with the field. KEEPTTL cannot be used together with EX/EXAT/PX/PXAT
 
 Return：
@@ -459,7 +460,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHGETWITHVER <key> <field>    
+> EXHGETWITHVER key field  
 > time complexity：O(1)     
 
 
@@ -492,7 +493,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHMGET <key> <field> [field ...]     
+> EXHMGET key field [field ...]     
 > time complexity：O(n)     
 
 
@@ -525,7 +526,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHMGETWITHVER <key> <field> [field ...]     
+> EXHMGETWITHVER key field [field ...]     
 > time complexity：O(n)     
 
 
@@ -558,7 +559,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHDEL <key> <field> <field> <field> ...     
+> EXHDEL key field [field...]       
 > time complexity：O(1)     
 
 
@@ -591,7 +592,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHLEN <key> [noexp]     
+> EXHLEN key [noexp]     
 > time complexity：It is O(1) if it is not a noexp option, and O(N) if it is a noexp option
 
 
@@ -623,7 +624,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHEXISTS <key> <field>     
+> EXHEXISTS key field     
 > time complexity：O(1)    
 
 
@@ -656,7 +657,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHSTRLEN <key> <field>     
+> EXHSTRLEN key field     
 > time complexity：O(1)     
 
 
@@ -689,7 +690,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHKEYS <key>      
+> EXHKEYS key      
 > time complexity：O(n)    
 
 
@@ -721,7 +722,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHVALS <key>     
+> EXHVALS key     
 > time complexity：O(n)     
 
 
@@ -753,7 +754,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHGETALL <key>     
+> EXHGETALL key     
 > time complexity：O(n)  
 
 

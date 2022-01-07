@@ -8,7 +8,7 @@
 - field支持单独设置expire和version
 - 针对field支持高效的active expire和passivity expire，其中active expire支持SORT_MODE和SCAN_MODE两种模式。
 - 语法和原生hash数据类型类似
-- 支持redis的swapdb、rename、move、copy等语义
+- 低内存占用，索引中无内存拷贝
 
 ## Active expire
 ### SORT_MODE：

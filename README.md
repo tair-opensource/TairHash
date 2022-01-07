@@ -5,12 +5,12 @@
 
 ### The main features：
 
-- Field supports setting expire and version
-- Support efficient active expire and passivity expire for field
-- The cmd is similar to the native hash data type
-- Support redis swapdb, rename, move and copy command
+- Field supports setting expiration and version
+- Support efficient active expiration (SORT mode and SCAN mode) and passivity expiration for field
+- The cmd is similar to the redis hash
+- Very low memory consumption, no memory copy in the index
 
-## Active expire
+## Active expiration
 ### SORT_MODE：
 ![avatar](imgs/tairhash_index.png)
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
@@ -20,24 +20,29 @@
 - Every time you read or write a field, it will also trigger the expiration of the field itself
 - All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
-**Advantages**: higher efficiency of expire elimination    
-**Disadvantages**: Because the SORT_MODE implementation relies on the `unlink2` callback function (see this [PR](https://github.com/redis/redis/pull/8999))) to release the index structure synchronously, you need to ensure that REDISMODULE_TYPE_METHOD_VERSION in your Redis is not Less than 4.
+**Supported redis version**: redis >= 7.0 and unstable branch
+
+**Advantages**: higher efficiency of expire elimination     
+
+**Disadvantages**: Because the SORT_MODE implementation relies on the `unlink2` callback function (see this [PR](https://github.com/redis/redis/pull/8999))) to release the index structure synchronously, So currently only supports redis >= 7.0 and unstable branch  
 
 **Usag**e: cmake with `-DSORT_MODE=yes` option, and recompile
 
-### SCAN_MODE:
+### SCAN_MODE(default):
 - Do not sort TairHash globally
 - Each TairHash will still use a sort index to sort the fields internally
 - The built-in timer will periodically use the SCAN command to find the TairHash that contains the expired field, and then check the sort index inside the TairHash to eliminate the field
 - Every time you read or write a field, it will also trigger the expiration of the field itself
 - All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
-**Advantages**: can run in the low version of redis (redis 5.x and  redis 6.x)     
-**Disadvantages**: low efficiency of expire elimination
+**Supported redis version**: redis >= 5.0
+
+**Advantages**: can run in the low version of redis (redis >= 5.0)  
+
+**Disadvantages**: low efficiency of expire elimination (compared with SORT mode)  
 
 **Usage**: cmake with `-DSORT_MODE=no` option, and recompile
 
-<br/>
 
 ## Quick Start
 

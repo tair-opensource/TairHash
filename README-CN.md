@@ -21,9 +21,10 @@
 - 每一次对tairhash的写操作，也会先检查第一级索引，并最多过期三个field，这些field不一定属于当前正在操作的key，因此理论上写的越快淘汰速度也就越快
 - 每一次读写field，也会触发对这个field自身的过期淘汰操作
 - 排序中所有的key和field都是指针引用，无内存拷贝，无内存膨胀问题
-  
+
+**支持的redis版本**: redis >= 7.0和unstable分支    
 **优点**：过期淘汰效率比较高    
-**缺点**：由于SORT_MODE实现依赖`unlink2`回调函数(见这个[PR](https://github.com/redis/redis/pull/8999)))同步释放索引结构，因此需要确保你的Redis中REDISMODULE_TYPE_METHOD_VERSION不低于4。
+**缺点**：由于SORT_MODE实现依赖`unlink2`回调函数(见这个[PR](https://github.com/redis/redis/pull/8999)))同步释放索引结构，因此需要较高的redis版本支持。
 
 **使用方式**：cmake的时候加上`-DSORT_MODE=yes`选项，并重新编译
 ### SCAN_MODE：
@@ -33,8 +34,9 @@
 - 每一次读写field，也会触发对这个field自身的过期淘汰操作
 - 排序中所有的key和field都是指针引用，无内存拷贝，无内存膨胀问题
 
-**优点**：可以运行在低版本的redis中（redis 5.0及以后的版本）      
-**缺点**：过期淘汰效率较低  
+**支持的redis版本**: redis >= 5.0  
+**优点**：可以运行在低版本的redis中（redis >= 5.0 ）      
+**缺点**：过期淘汰效率较低（相对SORT模式而言）  
 
 **使用方式**：cmake的时候加上`-DSORT_MODE=no`选项，并重新编译
 

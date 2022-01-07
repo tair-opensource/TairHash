@@ -7,7 +7,7 @@
 语法及复杂度：
 
 
-> EXHSET <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS version] [KEEPTTL]
+> EXHSET key field value [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS version] [KEEPTTL]  
 > 时间复杂度：O(1)
 
 
@@ -47,7 +47,7 @@
 语法及复杂度：
 
 
-> EXHGET <key> <field>
+> EXHGET key field  
 > 时间复杂度：O(1)
 
 
@@ -81,7 +81,7 @@
 语法及复杂度：
 
 
-> EXHMSET <key> <field> <value> [field value...]  
+> EXHMSET key field value [field value...]    
 > 时间复杂度：O(n)  
 
 
@@ -116,7 +116,7 @@
 语法及复杂度：
 
 
-> EXHPEXPIREAT <key> <field> <milliseconds-timestamp> [VER/ABS version] 
+> EXHPEXPIREAT key field milliseconds-timestamp [VER/ABS version]   
 > 时间复杂度：O(1)  
 
 
@@ -151,7 +151,7 @@
 语法及复杂度：
 
 
-> EXHPEXPIRE <key> <field> <milliseconds> [VER/ABS version]
+> EXHPEXPIRE key field milliseconds [VER/ABS version]  
 > 时间复杂度：O(1)  
 
 
@@ -186,7 +186,7 @@
 语法及复杂度：
 
 
-> EXHEXPIREAT <key> <field> <timestamp> [VER/ABS version]
+> EXHEXPIREAT key field timestamp [VER/ABS version]  
 > 时间复杂度：O(1)  
 
 
@@ -220,7 +220,7 @@
 语法及复杂度：
 
 
-> EXHEXPIRE <key> <field> <seconds> [VER/ABS version]
+> EXHEXPIRE key field seconds [VER/ABS version]  
 > 时间复杂度：O(1)  
 
 
@@ -256,7 +256,7 @@
 语法及复杂度：
 
 
-> EXHPTTL <key> <field>  
+> EXHPTTL key field    
 > 时间复杂度：O(1)  
 
 
@@ -290,7 +290,7 @@
 语法及复杂度：
 
 
-> EXHTTL <key> <field>  
+> EXHTTL key field    
 > 时间复杂度：O(1)  
 
 
@@ -324,7 +324,7 @@
 语法及复杂度：
 
 
-> EXHVER <key> <field>  
+> EXHVER key field     
 > 时间复杂度：O(1)  
 
 
@@ -358,7 +358,7 @@
 语法及复杂度：
 
 
-> EXHSETVER <key> <field> <version>  
+> EXHSETVER key field version    
 > 时间复杂度：O(1)  
 
 
@@ -392,8 +392,7 @@
 语法及复杂度：
 
 
-> EXHINCRBY <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [KEEPTTL]  
-> [MIN minval] [MAX maxval]  
+> EXHINCRBY key field value [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [KEEPTTL]    
 > 时间复杂度：O(1)  
 
 
@@ -417,6 +416,7 @@
 > PX: 指定field的相对过期时间，单位为毫秒，0表示立刻过期
 > PXAT: 指定field的绝对过期时间，单位为毫秒，0表示立刻过期
 > VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
+> MAX/MIN: 设置最大最小边界，本次incr操作后，field的值在此边界时incr才会被执行，否则返回overflow的错误。
 > KEEPTTL: 当未指定EX/EXAT/PX/PXAT时保留field的过期时间
 
 返回值：
@@ -433,7 +433,7 @@
 语法及复杂度：
 
 
-> EXHINCRBYFLOAT <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [KEEPTTL] 
+> EXHINCRBYFLOAT key field value [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [KEEPTTL]   
 > 时间复杂度：O(1)  
 
 
@@ -457,6 +457,7 @@
 > PX: 指定field的相对过期时间，单位为毫秒，0表示立刻过期
 > PXAT: 指定field的绝对过期时间，单位为毫秒，0表示立刻过期
 > VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
+> MAX/MIN: 设置最大最小边界，本次incr操作后，field的值在此边界时incr才会被执行，否则返回overflow的错误。
 > KEEPTTL: 当未指定EX/EXAT/PX/PXAT时保留field的过期时间
 
 返回值：
@@ -473,7 +474,7 @@
 语法及复杂度：
 
 
-> EXHGETWITHVER <key> <field>  
+> EXHGETWITHVER key field    
 > 时间复杂度：O(1)  
 
 
@@ -507,7 +508,7 @@
 语法及复杂度：
 
 
-> EXHMGET <key> <field> [field ...]  
+> EXHMGET key field [field ...]    
 > 时间复杂度：O(n)  
 
 
@@ -541,7 +542,7 @@
 语法及复杂度：
 
 
-> EXHMGETWITHVER <key> <field> [field ...]  
+> EXHMGETWITHVER key field [field ...]    
 > 时间复杂度：O(n)  
 
 
@@ -575,7 +576,7 @@
 语法及复杂度：
 
 
-> EXHDEL <key> <field> <field> <field> ...  
+> EXHDEL key field [field...]   
 > 时间复杂度：O(1)  
 
 
@@ -609,7 +610,7 @@
 语法及复杂度：
 
 
-> EXHLEN <key> [noexp]  
+> EXHLEN key [noexp]   
 > 时间复杂度：不是noexp选项时是O(1)，带noexp选项时是O(N)  
 
 
@@ -642,7 +643,7 @@
 语法及复杂度：
 
 
-> EXHEXISTS <key> <field>  
+> EXHEXISTS key field  
 > 时间复杂度：O(1)  
 
 
@@ -676,7 +677,7 @@
 语法及复杂度：
 
 
-> EXHSTRLEN <key> <field>  
+> EXHSTRLEN key field   
 > 时间复杂度：O(1)  
 
 
@@ -710,7 +711,7 @@
 语法及复杂度：
 
 
-> EXHKEYS <key>  
+> EXHKEYS key  
 > 时间复杂度：O(n)  
 
 
@@ -743,7 +744,7 @@
 语法及复杂度：
 
 
-> EXHVALS <key>  
+> EXHVALS key  
 > 时间复杂度：O(n)  
 
 
@@ -776,7 +777,7 @@
 语法及复杂度：
 
 
-> EXHGETALL <key>  
+> EXHGETALL key  
 > 时间复杂度：O(n)  
 
 

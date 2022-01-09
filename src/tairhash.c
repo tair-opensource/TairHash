@@ -291,6 +291,30 @@ static struct tairHashObj *createTairHashTypeObject() {
 }
 
 /* ========================== Common  func =============================*/
+void notifyFieldSpaceEvent(char *event, RedisModuleString *key, RedisModuleString *field, int dbid) {
+    size_t key_len, field_len;
+    const char *key_ptr = RedisModule_StringPtrLen(key, &key_len);
+    const char *field_ptr = RedisModule_StringPtrLen(field, &field_len);
+    /* tairhash@<db>@<key>__:<event> <field> notifications. */
+    RedisModuleString *channel = RedisModule_CreateStringPrintf(NULL, "tairhash@%d@%s__:%s", dbid, key_ptr, event);
+    RedisModuleString *message = RedisModule_CreateStringFromString(NULL, field);
+
+    if (RedisModule_PublishMessage) {
+        RedisModule_PublishMessage(NULL, channel, message);
+    } else {
+        RedisModuleCtx *ctx = RedisModule_GetThreadSafeContext(NULL);
+        RedisModule_SelectDb(ctx, dbid);
+        RedisModuleCallReply *reply = RedisModule_Call(ctx, "PUBLISH", "ss", channel, message);
+        if (reply != NULL) {
+            RedisModule_FreeCallReply(reply);
+        }
+        RedisModule_FreeThreadSafeContext(ctx);
+    }
+
+    RedisModule_FreeString(NULL, channel);
+    RedisModule_FreeString(NULL, message);
+}
+
 inline static int expireTairHashObjIfNeeded(RedisModuleCtx *ctx, RedisModuleString *key, tairHashObj *o,
                                             RedisModuleString *field, int is_timer) {
     TairHashVal *tair_hash_val = m_dictFetchValue(o->hash, field);
@@ -332,6 +356,7 @@ inline static int expireTairHashObjIfNeeded(RedisModuleCtx *ctx, RedisModuleStri
     }
     m_dictDelete(o->hash, field);
     RedisModule_Replicate(ctx, "EXHDEL", "ss", key_dup, field_dup);
+    notifyFieldSpaceEvent("expired", key_dup, field_dup, dbid);
     RedisModule_FreeString(NULL, key_dup);
     RedisModule_FreeString(NULL, field_dup);
 #else
@@ -342,6 +367,7 @@ inline static int expireTairHashObjIfNeeded(RedisModuleCtx *ctx, RedisModuleStri
         */
         RedisModuleCtx *ctx2 = RedisModule_GetThreadSafeContext(NULL);
         RedisModule_SelectDb(ctx2, RedisModule_GetSelectedDb(ctx));
+        notifyFieldSpaceEvent("expired", key, field, RedisModule_GetSelectedDb(ctx));
         RedisModuleCallReply *reply = RedisModule_Call(ctx2, "EXHDELREPL", "ss!", key, field);
         if (reply != NULL) {
             RedisModule_FreeCallReply(reply);
@@ -353,6 +379,7 @@ inline static int expireTairHashObjIfNeeded(RedisModuleCtx *ctx, RedisModuleStri
         m_zslDelete(o->expire_index, when, field_dup, NULL);
         m_dictDelete(o->hash, field);
         RedisModule_Replicate(ctx, "EXHDEL", "ss", key_dup, field_dup);
+        notifyFieldSpaceEvent("expired", key_dup, field_dup, RedisModule_GetSelectedDb(ctx));
         RedisModule_FreeString(NULL, key_dup);
         RedisModule_FreeString(NULL, field_dup);
     }
@@ -369,6 +396,10 @@ int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModu
 #if SORT_MODE
     RedisModule_DeleteKey(key);
     RedisModule_Replicate(ctx, "DEL", "s", raw_key);
+    if (RedisModule_NotifyKeyspaceEvent) {
+        RedisModule_NotifyKeyspaceEvent(ctx, REDISMODULE_NOTIFY_GENERIC, "del", raw_key);
+    }
+    RedisModule_CloseKey(key);
 #else
     /* See bugfix: https://github.com/redis/redis/pull/8617  
                    https://github.com/redis/redis/pull/8097 
@@ -812,7 +843,7 @@ inline static void tryPassiveExpire(RedisModuleCtx *ctx, RedisModuleString *myke
     }
 
 #else
-    real_key = RedisModule_OpenKey(ctx, mykey, REDISMODULE_READ);
+    real_key = RedisModule_OpenKey(ctx, mykey, REDISMODULE_READ | REDISMODULE_WRITE);
     if (RedisModule_KeyType(real_key) != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType) {
         tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
         if (tair_hash_obj->expire_index->length > 0) {
@@ -856,14 +887,15 @@ inline static void tryPassiveExpire(RedisModuleCtx *ctx, RedisModuleString *myke
 
         if (start_index) {
             m_zslDeleteRangeByRank(tair_hash_obj->expire_index, 1, start_index);
-            delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj);
+            if (!delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj)) {
+                RedisModule_CloseKey(real_key);
+            }
         }
 #ifdef SORT_MODE
         if (ln) {
             m_zslInsert(g_expire_index[dbid], ln->score, takeAndRef(tair_hash_obj->key));
         }
 #endif
-        RedisModule_CloseKey(real_key);
         m_listDelNode(keys, node);
     }
 

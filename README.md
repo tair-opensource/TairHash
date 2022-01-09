@@ -9,6 +9,7 @@
 - Support efficient active expiration (SORT mode and SCAN mode) and passivity expiration for field
 - The cmd is similar to the redis hash
 - Very low memory consumption, no memory copy in the index
+- Support filed expired deletion event notification (based on pubsub)
 
 ## Active expiration
 ### SORT_MODE：
@@ -43,6 +44,10 @@
 
 **Usage**: cmake with `-DSORT_MODE=no` option, and recompile
 
+## Event notification   
+
+tairhash will send an event notification when the field expires (triggered by active or passive expiration). The notification is sent in pubsub mode. The format of the channel is: `tairhash@<db>@<key>__:<event>` , currently only supports expired event type, so
+The channel is: `tairhash@<db>@<key>__:expired`, and the message content is the expired field.
 
 ## Quick Start
 

@@ -1605,6 +1605,18 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal -3 [r exhttl exhashkey field]
         assert_equal 0 [r exists exhashkey]
     }
+
+    test {Exhash field expired event notify} {
+       r del exhashkey
+       r select 9
+       set rd1 [redis_deferring_client]
+
+       assert_equal {1} [psubscribe $rd1 {tairhash*}]
+       assert_equal 1 [r exhset exhashkey foo bar ex 1]
+       after 2000
+       assert_equal {pmessage tairhash* tairhash@9@exhashkey__:expired foo} [$rd1 read]
+       $rd1 close
+    }
     
     start_server {tags {"tairhash repl"} overrides {bind 0.0.0.0}} {
         r module load $testmodule

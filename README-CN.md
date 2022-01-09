@@ -9,9 +9,10 @@
 - 针对field支持高效的active expire和passivity expire，其中active expire支持SORT_MODE和SCAN_MODE两种模式。
 - 语法和原生hash数据类型类似
 - 低内存占用，索引中无内存拷贝
+- 支持filed过期删除事件通知（基于pubsub）
 
-## Active expire
-### SORT_MODE：
+## 主动过期
+### SORT_MODE（排序模式）：
 
 ![avatar](imgs/tairhash_index.png)
 
@@ -27,7 +28,7 @@
 **缺点**：由于SORT_MODE实现依赖`unlink2`回调函数(见这个[PR](https://github.com/redis/redis/pull/8999)))同步释放索引结构，因此需要较高的redis版本支持。
 
 **使用方式**：cmake的时候加上`-DSORT_MODE=yes`选项，并重新编译
-### SCAN_MODE：
+### SCAN_MODE（扫描模式）：
 - 不对TairHash进行全局排序
 - 每个TairHash内部依然会使用一个排序索引对fields进行排序
 - 内置定时器会周期使用SCAN命令找到包含过期field的TairHash，然后检查TairHash内部的排序索引，进行field的淘汰
@@ -40,7 +41,10 @@
 
 **使用方式**：cmake的时候加上`-DSORT_MODE=no`选项，并重新编译
 
-<br/>
+## 事件通知  
+
+tairhash在field发生过期时（由主动或被动过期触发）会发送一个事件通知，通知以pubsub方式发送，channel的格式为：`tairhash@<db>@<key>__:<event>` , 目前只支持expired事件类型，因此
+channel为：`tairhash@<db>@<key>__:expired`，消息内容为过期的field。
 
 ## 快速开始
 

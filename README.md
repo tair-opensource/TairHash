@@ -1,4 +1,12 @@
-![avatar](imgs/tairhash_logo.jpg)
+![](https://img.shields.io/badge/license-Apache--2.0-green)
+![](https://img.shields.io/badge/build-pass-green)
+![](https://img.shields.io/badge/PRs-welcome-green)
+   
+   
+<div align=center>
+<img src="imgs/tairhash_logo.jpg" width="500"/>
+</div>
+   
 
 # TairHash
 ## Introduction  [中文说明](README-CN.md)

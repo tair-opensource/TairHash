@@ -1,3 +1,5 @@
+![avatar](imgs/tairhash_logo.jpg)
+
 # TairHash: field带有过期时间和版本的hash数据结构
 ## 简介  [英文说明](README.md)
      TairHash是基于redis module开发的一种hash数据结构，和redis原生的hash数据结构相比，TairHash不但和原生hash一样具有丰富的数据接口和高性能，还可以为field设置过期时间和版本，这极大的提高了hash数据结构的灵活性，在很多场景下可以大大的简化业务开发。TairHash提供active expire机制，即使field在过期后没有被访问也可以被主动删除，释放内存。

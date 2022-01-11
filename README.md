@@ -1,3 +1,5 @@
+![avatar](imgs/tairhash_logo.jpg)
+
 # TairHash
 ## Introduction  [中文说明](README-CN.md)
      TairHash is a hash data structure developed based on the redis module. TairHash not only has the same rich data interface and high performance as the native hash, but also can set the expiration and version for the field. TairHash provides an active expiration mechanism, even if the field is not accessed after expiration, it can be actively deleted to release the memory.

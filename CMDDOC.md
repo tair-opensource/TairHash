@@ -237,6 +237,37 @@ Return：
 > Return 1 when the field exists, and 0 when the field does not exist    
 > When the version verification fails, the update version is stale error will be returned, and the corresponding exception information will be returned for other errors.   
 
+#### EXHPERSIST
+
+
+Grammar and complexity：
+
+
+> EXHEXPIRE key field  
+> time complexity：O(1)  
+
+
+
+Command Description：
+
+
+> Set a field to never expire
+
+
+
+Parameter：
+
+
+> key: The key used to find the TairHash     
+> field: An element in TairHash  
+
+
+
+Return：
+
+
+> 1：Successfully removed the expiration setting on the field  
+> 0：The key or field does not exist, or the field exists but does not have an expiration setting  
 
 
 #### EXHPTTL

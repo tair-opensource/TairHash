@@ -248,6 +248,38 @@
 > 成功：当field存在时返回1，当field不存在时返回0  
 > 失败：当版本校验失败时返回update version is stale错误，其他错误返回相应异常信息  
 
+#### EXHPERSIST
+
+
+语法及复杂度：
+
+
+> EXHEXPIRE key field
+> 时间复杂度：O(1)  
+
+
+
+命令描述：
+
+
+> 将一个field设置为永不过期
+
+
+
+参数：
+
+
+> key: 用于查找该TairHash的键  
+> field: TairHash中的一个元素  
+
+
+
+返回值：
+
+
+> 1：成功移除field上的过期设置
+> 0：key或field不存在，或field存在但当前没有过期设置
+
 
 
 #### EXHPTTL

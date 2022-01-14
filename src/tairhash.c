@@ -3349,7 +3349,7 @@ int Module_CreateCommands(RedisModuleCtx *ctx) {
     CREATE_WRCMD("exhexpireat", TairHashTypeHexpireAt_RedisCommand)
     CREATE_WRCMD("exhpexpire", TairHashTypeHpexpire_RedisCommand)
     CREATE_WRCMD("exhpexpireat", TairHashTypeHpexpireAt_RedisCommand)
-    CREATE_WRCMD("exhpersist", TairHashTypeHpexpireAt_RedisCommand)
+    CREATE_WRCMD("exhpersist", TairHashTypeHpersist_RedisCommand)
 
     /* readonly cmds */
     CREATE_ROCMD("exhget", TairHashTypeHget_RedisCommand)

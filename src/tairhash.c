@@ -1597,6 +1597,7 @@ int TairHashTypeHpersist_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **a
     } else {
         tair_hash_val->expire = 0;
 #ifdef SORT_MODE
+        int dbid = RedisModule_GetSelectedDb(ctx);
         long long before_min_score, after_min_score;
         MY_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
         before_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;

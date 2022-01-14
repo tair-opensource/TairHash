@@ -1553,6 +1553,69 @@ int TairHashTypeHttl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
     return tairHashTTLGenericFunc(ctx, argv, argc, UNIT_SECONDS);
 }
 
+/* EXHPERSIST <key> <field> */
+int TairHashTypeHpersist_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    RedisModule_AutoMemory(ctx);
+
+    if (argc != 3) {
+        return RedisModule_WrongArity(ctx);
+    }
+
+    RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
+    int type = RedisModule_KeyType(key);
+    if (REDISMODULE_KEYTYPE_EMPTY != type && RedisModule_ModuleTypeGetType(key) != TairHashType) {
+        RedisModule_ReplyWithError(ctx, REDISMODULE_ERRORMSG_WRONGTYPE);
+        return REDISMODULE_ERR;
+    }
+
+    tairHashObj *tair_hash_obj = NULL;
+    if (type == REDISMODULE_KEYTYPE_EMPTY) {
+        RedisModule_ReplyWithLongLong(ctx, 0);
+        return REDISMODULE_OK;
+    } else {
+        tair_hash_obj = RedisModule_ModuleTypeGetValue(key);
+    }
+
+    if (tair_hash_obj == NULL) {
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_ERR);
+        return REDISMODULE_ERR;
+    }
+
+    if (expireTairHashObjIfNeeded(ctx, argv[1], tair_hash_obj, argv[2], 0)) {
+        RedisModule_ReplyWithLongLong(ctx, 0);
+        return REDISMODULE_OK;
+    }
+
+    TairHashVal *tair_hash_val = (TairHashVal *)m_dictFetchValue(tair_hash_obj->hash, argv[2]);
+    if (tair_hash_val == NULL) {
+        RedisModule_ReplyWithLongLong(ctx, 0);
+        return REDISMODULE_OK;
+    }
+
+    if (!tair_hash_val->expire) {
+        RedisModule_ReplyWithLongLong(ctx, 0);
+    } else {
+        tair_hash_val->expire = 0;
+#ifdef SORT_MODE
+        long long before_min_score, after_min_score;
+        MY_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
+        before_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
+#endif
+        m_zslDelete(tair_hash_obj->expire_index, tair_hash_val->expire, argv[2], NULL);
+#ifdef SORT_MODE
+        if (tair_hash_obj->expire_index->header->level[0].forward) {
+            after_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
+            m_zslUpdateScore(g_expire_index[dbid], before_min_score, argv[1], after_min_score);
+        } else {
+            m_zslDelete(g_expire_index[dbid], before_min_score, argv[1], NULL);
+        }
+#endif
+        RedisModule_ReplyWithLongLong(ctx, 1);
+    }
+
+    return REDISMODULE_OK;
+}
+
 /*  EXHVER <key> <field> */
 int TairHashTypeHver_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     RedisModule_AutoMemory(ctx);
@@ -3285,6 +3348,7 @@ int Module_CreateCommands(RedisModuleCtx *ctx) {
     CREATE_WRCMD("exhexpireat", TairHashTypeHexpireAt_RedisCommand)
     CREATE_WRCMD("exhpexpire", TairHashTypeHpexpire_RedisCommand)
     CREATE_WRCMD("exhpexpireat", TairHashTypeHpexpireAt_RedisCommand)
+    CREATE_WRCMD("exhpersist", TairHashTypeHpexpireAt_RedisCommand)
 
     /* readonly cmds */
     CREATE_ROCMD("exhget", TairHashTypeHget_RedisCommand)

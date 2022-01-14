@@ -1416,7 +1416,22 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
 
         set res [r exists tairhashkey]
         assert_equal 0 $res "assert fail, tairhash still exist"
+    }
 
+    test {Exhpersist} {
+        r del tairhashkey
+
+        assert_equal 1 [r exhset tairhashkey field1 val1 EX 1]
+        assert_equal 1 [r exhset tairhashkey field2 val2 EX 1]
+        
+        assert_equal 1 [r exhpersist tairhashkey field1]
+
+        after 3000
+
+        assert_equal 1 [r exhexists tairhashkey field1]
+        assert_equal 0 [r exhexists tairhashkey field2]
+
+        assert_equal 0 [r exhpersist tairhashkey field2]
     }
 
     test {Exhgetwithver} {

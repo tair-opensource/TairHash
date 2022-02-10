@@ -1,7 +1,7 @@
 ![](https://img.shields.io/badge/license-Apache--2.0-green)
-![](https://img.shields.io/badge/build-pass-green)
+[![Build](https://github.com/alibaba/TairHash/actions/workflows/cmake.yml/badge.svg)](https://github.com/alibaba/TairHash/actions/workflows/cmake.yml)
+[![CI](https://github.com/alibaba/TairHash/actions/workflows/ci.yml/badge.svg)](https://github.com/alibaba/TairHash/actions/workflows/ci.yml)
 ![](https://img.shields.io/badge/PRs-welcome-green)
-   
 
 <div align=center>
 <img src="imgs/tairhash_logo.jpg" width="500"/>

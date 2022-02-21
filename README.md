@@ -21,9 +21,10 @@
 - Very low memory consumption, no memory copy in the index
 - Support filed expired deletion event notification (based on pubsub)
 
+## Data structure
+![avatar](imgs/tairhash_index2.png)  
 ## Active expiration
 ### SORT_MODE：
-![avatar](imgs/tairhash_index.png)
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
 - The first-level uses the smallest ttl in the second-level for sorting, so the main key is globally ordered
 - The built-in timer will periodically scan the first-level index to find out a key that has expired, and then check the secondary index of these keys to eliminate the expired fields. This is the active expire

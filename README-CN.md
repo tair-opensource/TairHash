@@ -19,6 +19,9 @@
 - 低内存占用，索引中无内存拷贝
 - 支持filed过期删除事件通知（基于pubsub）
 
+## 数据结构
+![avatar](imgs/tairhash_index2.png)  
+
 ## 主动过期
 ### SORT_MODE（排序模式）：
 

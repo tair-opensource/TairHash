@@ -102,7 +102,7 @@ OK
 
 ## Docker
 ```
-docker run -p 6379:6379 chenxujiaoyang/tairhash:latest
+docker run -p 6379:6379 tairmodule/tairhash:latest
 ```
 ## 编译及使用
 

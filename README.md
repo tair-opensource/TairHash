@@ -102,6 +102,11 @@ OK
 127.0.0.1:6379> EXHVER k f
 (integer) 2
 ```  
+
+## Docker
+```
+docker run -p 6379:6379 tairmodule/tairhash:latest
+```
 ## BUILD
 
 ```

@@ -36,7 +36,7 @@
 - 每一次读写field，也会触发对这个field自身的过期淘汰操作
 - 排序中所有的key和field都是指针引用，无内存拷贝，无内存膨胀问题
 
-**支持的redis版本**: redis >= 7.0和unstable分支    
+**支持的redis版本**: redis >= 7.0
 **优点**：过期淘汰效率比较高    
 **缺点**：由于SORT_MODE实现依赖`unlink2`回调函数(见这个[PR](https://github.com/redis/redis/pull/8999)))同步释放索引结构，因此需要较高的redis版本支持。
 

@@ -33,7 +33,7 @@
 - Every time you read or write a field, it will also trigger the expiration of the field itself
 - All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
-**Supported redis version**: redis >= 7.0 and unstable branch
+**Supported redis version**: redis >= 7.0
 
 **Advantages**: higher efficiency of expire elimination     
 

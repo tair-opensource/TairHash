@@ -19,7 +19,7 @@
 - 针对field支持高效的active expire和passivity expire，其中active expire支持SORT_MODE和SCAN_MODE两种模式。
 - 语法和原生hash数据类型类似
 - 低内存占用，索引中无内存拷贝
-- 支持filed过期删除事件通知（基于pubsub）
+- 支持field过期删除事件通知（基于pubsub）
 
 ## 数据结构
 ![avatar](imgs/tairhash_index2.png)  

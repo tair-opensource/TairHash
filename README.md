@@ -20,7 +20,7 @@
 - Support efficient active expiration (SORT mode and SCAN mode) and passivity expiration for field
 - The cmd is similar to the redis hash
 - Very low memory consumption, no memory copy in the index
-- Support filed expired deletion event notification (based on pubsub)
+- Support field expired event notification (based on pubsub)
 
 ## Data structure
 ![avatar](imgs/tairhash_index2.png)  

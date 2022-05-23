@@ -85,7 +85,7 @@ inline RedisModuleString *takeAndRef(RedisModuleString *str) {
 }
 
 #ifdef SORT_MODE
-#define MY_Assert(e)             \
+#define Module_Assert(e)         \
     do {                         \
         RedisModule_Assert((e)); \
     } while (0)
@@ -93,12 +93,12 @@ inline RedisModuleString *takeAndRef(RedisModuleString *str) {
 #define ACTIVE_EXPIRE_INSERT(dbid, o, field, expire)                                               \
     do {                                                                                           \
         if (expire) {                                                                              \
-            long long before_min_score = -1;                                                       \
+            long long before_min_score = -1, after_min_score = -1;                                 \
             if (o->expire_index->header->level[0].forward) {                                       \
                 before_min_score = o->expire_index->header->level[0].forward->score;               \
             }                                                                                      \
             m_zslInsert(o->expire_index, expire, takeAndRef(field));                               \
-            long long after_min_score = o->expire_index->header->level[0].forward->score;          \
+            after_min_score = o->expire_index->header->level[0].forward->score;                    \
             if (before_min_score > 0) {                                                            \
                 m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score); \
             } else {                                                                               \
@@ -107,8 +107,8 @@ inline RedisModuleString *takeAndRef(RedisModuleString *str) {
         }                                                                                          \
     } while (0)
 #else
-#define MY_Assert(_e) ((_e) ? (void)0 : (_myAssert(#_e, __FILE__, __LINE__), abort()))
-void _myAssert(const char *estr, const char *file, int line) {
+#define Module_Assert(_e) ((_e) ? (void)0 : (_moduleAssert(#_e, __FILE__, __LINE__), abort()))
+void _moduleAssert(const char *estr, const char *file, int line) {
     fprintf(stderr, "=== ASSERTION FAILED ===");
     fprintf(stderr, "==> %s:%d '%s' is not true", file, line, estr);
     *((char *)-1) = 'x';
@@ -127,12 +127,12 @@ void _myAssert(const char *estr, const char *file, int line) {
 #define ACTIVE_EXPIRE_UPDATE(dbid, o, field, cur_expire, new_expire)                           \
     do {                                                                                       \
         if (cur_expire != new_expire) {                                                        \
-            long long before_min_score = -1;                                                   \
+            long long before_min_score = -1, after_min_score = 1;                              \
             m_zskiplistNode *ln = o->expire_index->header->level[0].forward;                   \
-            MY_Assert(ln != NULL);                                                             \
+            Module_Assert(ln != NULL);                                                         \
             before_min_score = ln->score;                                                      \
             m_zslUpdateScore(o->expire_index, cur_expire, field, new_expire);                  \
-            long long after_min_score = o->expire_index->header->level[0].forward->score;      \
+            after_min_score = o->expire_index->header->level[0].forward->score;                \
             m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score); \
         }                                                                                      \
     } while (0)
@@ -152,7 +152,7 @@ void _myAssert(const char *estr, const char *file, int line) {
         if (cur_expire != 0) {                                                                    \
             long long before_min_score = -1;                                                      \
             m_zskiplistNode *ln = o->expire_index->header->level[0].forward;                      \
-            MY_Assert(ln != NULL);                                                                \
+            Module_Assert(ln != NULL);                                                            \
             before_min_score = ln->score;                                                         \
             m_zslDelete(o->expire_index, cur_expire, field, NULL);                                \
             if (o->expire_index->header->level[0].forward) {                                      \
@@ -175,10 +175,10 @@ void _myAssert(const char *estr, const char *file, int line) {
 /* ========================== Internal data structure  =======================*/
 
 /*
- * We use `version` and `expire` as part of the tairhash value. This may be different 
- * from the expire on the redis key. Redis regards `expire` as part of the database, not 
- * part of the key. For example, after you perform a restore on a key, the original expire 
- * will be Lost unless you specify ttl again. The `version` and `expire` of tairhash will 
+ * We use `version` and `expire` as part of the tairhash value. This may be different
+ * from the expire on the redis key. Redis regards `expire` as part of the database, not
+ * part of the key. For example, after you perform a restore on a key, the original expire
+ * will be Lost unless you specify ttl again. The `version` and `expire` of tairhash will
  * be completely recovered after the restore.
  */
 typedef struct TairHashVal {
@@ -337,9 +337,8 @@ inline static int expireTairHashObjIfNeeded(RedisModuleCtx *ctx, RedisModuleStri
     if (!is_timer) {
         long long before_min_score = o->expire_index->header->level[0].forward->score;
         m_zslDelete(o->expire_index, when, field_dup, NULL);
-        long long after_min_score;
         if (o->expire_index->header->level[0].forward != NULL) {
-            after_min_score = o->expire_index->header->level[0].forward->score;
+            long long after_min_score = o->expire_index->header->level[0].forward->score;
             m_zslUpdateScore(g_expire_index[dbid], before_min_score, key, after_min_score);
         } else {
             m_zslDelete(g_expire_index[dbid], before_min_score, key, NULL);
@@ -352,8 +351,8 @@ inline static int expireTairHashObjIfNeeded(RedisModuleCtx *ctx, RedisModuleStri
     RedisModule_FreeString(NULL, field_dup);
 #else
     if (is_timer) {
-        /* See bugfix: https://github.com/redis/redis/pull/8617  
-                       https://github.com/redis/redis/pull/8097 
+        /* See bugfix: https://github.com/redis/redis/pull/8617
+                       https://github.com/redis/redis/pull/8097
                        https://github.com/redis/redis/pull/7037
         */
         RedisModuleCtx *ctx2 = RedisModule_GetThreadSafeContext(NULL);
@@ -392,8 +391,8 @@ int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModu
     }
     RedisModule_CloseKey(key);
 #else
-    /* See bugfix: https://github.com/redis/redis/pull/8617  
-                   https://github.com/redis/redis/pull/8097 
+    /* See bugfix: https://github.com/redis/redis/pull/8617
+                   https://github.com/redis/redis/pull/8097
                    https://github.com/redis/redis/pull/7037
      */
     RedisModule_CloseKey(key);
@@ -496,31 +495,31 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
         }
 
 #else
-        /* Each db has its own cursor, but this value may be wrong when swapdb appears (because we do not have a callback notification), 
+        /* Each db has its own cursor, but this value may be wrong when swapdb appears (because we do not have a callback notification),
          * But this will not cause serious problems. */
         static long long scan_cursor[DB_NUM] = {0};
         RedisModuleCallReply *reply = RedisModule_Call(ctx, "SCAN", "lcl", scan_cursor[current_db], "COUNT", expire_keys_per_loop);
         if (reply != NULL) {
             switch (RedisModule_CallReplyType(reply)) {
                 case REDISMODULE_REPLY_ARRAY: {
-                    MY_Assert(RedisModule_CallReplyLength(reply) == 2);
+                    Module_Assert(RedisModule_CallReplyLength(reply) == 2);
 
                     RedisModuleCallReply *cursor_reply = RedisModule_CallReplyArrayElement(reply, 0);
-                    MY_Assert(RedisModule_CallReplyType(cursor_reply) == REDISMODULE_REPLY_STRING);
-                    MY_Assert(RedisModule_StringToLongLong(RedisModule_CreateStringFromCallReply(cursor_reply), &scan_cursor[current_db]) == REDISMODULE_OK);
+                    Module_Assert(RedisModule_CallReplyType(cursor_reply) == REDISMODULE_REPLY_STRING);
+                    Module_Assert(RedisModule_StringToLongLong(RedisModule_CreateStringFromCallReply(cursor_reply), &scan_cursor[current_db]) == REDISMODULE_OK);
 
                     RedisModuleCallReply *keys_reply = RedisModule_CallReplyArrayElement(reply, 1);
-                    MY_Assert(RedisModule_CallReplyType(keys_reply) == REDISMODULE_REPLY_ARRAY);
+                    Module_Assert(RedisModule_CallReplyType(keys_reply) == REDISMODULE_REPLY_ARRAY);
                     size_t keynum = RedisModule_CallReplyLength(keys_reply);
 
                     int j;
                     for (j = 0; j < keynum; j++) {
                         RedisModuleCallReply *key_reply = RedisModule_CallReplyArrayElement(keys_reply, j);
-                        MY_Assert(RedisModule_CallReplyType(key_reply) == REDISMODULE_REPLY_STRING);
+                        Module_Assert(RedisModule_CallReplyType(key_reply) == REDISMODULE_REPLY_STRING);
                         key = RedisModule_CreateStringFromCallReply(key_reply);
                         real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_OPEN_KEY_NOTOUCH);
-                        /* Since RedisModule_KeyType does not deal with the stream type, it is possible to 
-                           return REDISMODULE_KEYTYPE_EMPTY here, so we must deal with it until after this 
+                        /* Since RedisModule_KeyType does not deal with the stream type, it is possible to
+                           return REDISMODULE_KEYTYPE_EMPTY here, so we must deal with it until after this
                            bugfix: https://github.com/redis/redis/commit/1833d008b3af8628835b5f082c5b4b1359557893 */
                         if (RedisModule_KeyType(real_key) == REDISMODULE_KEYTYPE_EMPTY) {
                             continue;
@@ -556,7 +555,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
             real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE | REDISMODULE_OPEN_KEY_NOTOUCH);
             int type = RedisModule_KeyType(real_key);
             if (type != REDISMODULE_KEYTYPE_EMPTY) {
-                MY_Assert(RedisModule_ModuleTypeGetType(real_key) == TairHashType);
+                Module_Assert(RedisModule_ModuleTypeGetType(real_key) == TairHashType);
             } else {
                 /* Note: redis scan may return dup key. */
                 m_listDelNode(keys, node);
@@ -566,7 +565,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
             tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
 
             zsl_len = tair_hash_obj->expire_index->length;
-            MY_Assert(zsl_len > 0);
+            Module_Assert(zsl_len > 0);
 
             ln2 = tair_hash_obj->expire_index->header->level[0].forward;
             start_index = 0;
@@ -603,15 +602,18 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
         current_db++;
     }
 
+    // clang-format off
     stat_last_active_expire_time_msec = RedisModule_Milliseconds() - start;
-    stat_max_active_expire_time_msec = stat_max_active_expire_time_msec < stat_last_active_expire_time_msec ? stat_last_active_expire_time_msec : stat_max_active_expire_time_msec;
+    stat_max_active_expire_time_msec = stat_max_active_expire_time_msec < stat_last_active_expire_time_msec ? 
+        stat_last_active_expire_time_msec : stat_max_active_expire_time_msec;
     total_expire_time += stat_last_active_expire_time_msec;
     ++loop_cnt;
-    if (loop_cnt % 1000 == 0) {
+    if (loop_cnt % 10 == 0) {
         stat_avg_active_expire_time_msec = total_expire_time / loop_cnt;
         loop_cnt = 0;
         total_expire_time = 0;
     }
+    // clang-format on
 
 restart:
     if (enable_active_expire) {
@@ -710,7 +712,7 @@ static int keySpaceNotification(RedisModuleCtx *ctx, int type, const char *event
         RedisModule_SelectDb(ctx, local_to_dbid);
         RedisModuleKey *real_key = RedisModule_OpenKey(ctx, local_to_key, REDISMODULE_READ | REDISMODULE_WRITE);
         int type = RedisModule_KeyType(real_key);
-        MY_Assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
+        Module_Assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
         tairHashObj *tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
 
         /* If there are no expire fields, we don’t have any indexes to adjust, just return ASAP. */
@@ -787,8 +789,8 @@ void startExpireTimer(RedisModuleCtx *ctx, void *data) {
 }
 
 /*
- * Although we have a timer interval to execute the active expire task, it is conceivable that its efficiency will 
- * not be very high. Thanks to our globally ordered expire index, we can perform an expire check every time a write 
+ * Although we have a timer interval to execute the active expire task, it is conceivable that its efficiency will
+ * not be very high. Thanks to our globally ordered expire index, we can perform an expire check every time a write
  * command is executed, and delete up to three expired fields each time. Therefore, we allocate the expired deletion
  * tasks to each request. In theory, the faster the request, the faster the deletion.
  **/
@@ -857,11 +859,11 @@ inline static void tryPassiveExpire(RedisModuleCtx *ctx, RedisModuleString *myke
         real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE);
         int type = RedisModule_KeyType(real_key);
 
-        MY_Assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
+        Module_Assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
         tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
 
         zsl_len = tair_hash_obj->expire_index->length;
-        MY_Assert(zsl_len > 0);
+        Module_Assert(zsl_len > 0);
 
         start_index = 0;
         ln = tair_hash_obj->expire_index->header->level[0].forward;
@@ -1590,7 +1592,7 @@ int TairHashTypeHpersist_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **a
 #ifdef SORT_MODE
         int dbid = RedisModule_GetSelectedDb(ctx);
         long long before_min_score, after_min_score;
-        MY_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
+        Module_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
         before_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
 #endif
         m_zslDelete(tair_hash_obj->expire_index, tair_hash_val->expire, argv[2], NULL);
@@ -2408,7 +2410,7 @@ int TairHashTypeHdel_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
             if (tair_hash_val->expire > 0) {
 #ifdef SORT_MODE
                 long long before_min_score, after_min_score;
-                MY_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
+                Module_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
                 before_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
 #endif
                 m_zslDelete(tair_hash_obj->expire_index, tair_hash_val->expire, argv[j], NULL);
@@ -2433,7 +2435,7 @@ int TairHashTypeHdel_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
     return REDISMODULE_OK;
 }
 
-/* Since using `RedisModule_Replicate` directly in the timer callback will generate nested MULTIs, we have 
+/* Since using `RedisModule_Replicate` directly in the timer callback will generate nested MULTIs, we have
  * to generate a new internal command and then use `RedisModule_Call` to call it in the module. It is best
  * not to use this command directly in the client. */
 
@@ -2526,7 +2528,7 @@ int TairHashTypeHdelWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString 
             if (ver == 0 || ver == tair_hash_val->version) {
                 if (tair_hash_val->expire > 0) {
 #ifdef SORT_MODE
-                    MY_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
+                    Module_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
                     before_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
 #endif
                     m_zslDelete(tair_hash_obj->expire_index, tair_hash_val->expire, argv[j], NULL);
@@ -2947,10 +2949,9 @@ int TairHashTypeHscan_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     }
 
     /* Step 1: Parse options. */
-    int j;
     RedisModuleString *pattern = NULL;
     long long count = TAIR_HASH_SCAN_DEFAULT_COUNT;
-    for (j = 3; j < argc; j++) {
+    for (int j = 3; j < argc; j++) {
         RedisModuleString *next = (j == argc - 1) ? NULL : argv[j + 1];
         if (!mstrcasecmp(argv[j], "MATCH") && next) {
             pattern = next;
@@ -3324,7 +3325,6 @@ int Module_CreateCommands(RedisModuleCtx *ctx) {
 #define CREATE_WRMCMD(name, tgt, firstkey, lastkey, keystep) CREATE_CMD(name, tgt, "write deny-oom", firstkey, lastkey, keystep);
 #define CREATE_ROMCMD(name, tgt, firstkey, lastkey, keystep) CREATE_CMD(name, tgt, "readonly fast", firstkey, lastkey, keystep);
 
-
     /* write cmds */
     CREATE_WRCMD("exhset", TairHashTypeHset_RedisCommand)
     CREATE_WRCMD("exhdel", TairHashTypeHdel_RedisCommand)
@@ -3439,8 +3439,8 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
 #endif
 
     if (enable_active_expire) {
-        /* Here we can't directly use the 'ctx' passed by OnLoad, because 
-         * in some old version redis `CreateTimer` will trigger a crash, see bugfix: 
+        /* Here we can't directly use the 'ctx' passed by OnLoad, because
+         * in some old version redis `CreateTimer` will trigger a crash, see bugfix:
          * https://github.com/redis/redis/commit/096592506ef3f548a4a3484d5829e04749a24a99
          * https://github.com/redis/redis/commit/7b5f4b175b96dca2093dc1898c3df97e3e096526 */
         RedisModuleCtx *ctx2 = RedisModule_GetThreadSafeContext(NULL);

@@ -58,7 +58,7 @@ jobs:
         cd redis
         ./runtest --stack-logging --single unit/type/tairhash
 
-  test-ubuntu-with-redis-unstable-sort-mode:
+  test-ubuntu-with-redis-7:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
@@ -67,7 +67,34 @@ jobs:
        sudo apt-get install git
        git clone https://github.com/redis/redis
        cd redis
-       git checkout unstable
+       git checkout 7.0
+       make REDIS_CFLAGS='-Werror' BUILD_TLS=yes
+    - name: make tairhash
+      run: |
+       mkdir build
+       cd build
+       cmake ../
+       make 
+    - name: test
+      run: |
+        sudo apt-get install tcl8.6 tclx
+        work_path=$(pwd)
+        module_path=$work_path/lib
+        sed -e "s#your_path#$module_path#g" tests/tairhash.tcl > redis/tests/unit/type/tairhash.tcl
+        sed -i 's#unit/type/string#unit/type/tairhash#g' redis/tests/test_helper.tcl
+        cd redis
+        ./runtest --stack-logging --single unit/type/tairhash
+
+  test-ubuntu-with-redis-7-sort-mode:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: clone and make redis
+      run: |
+       sudo apt-get install git
+       git clone https://github.com/redis/redis
+       cd redis
+       git checkout 7.0
        make REDIS_CFLAGS='-Werror' BUILD_TLS=yes
     - name: make tairhash
       run: |

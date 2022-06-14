@@ -604,7 +604,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
 
     // clang-format off
     stat_last_active_expire_time_msec = RedisModule_Milliseconds() - start;
-    stat_max_active_expire_time_msec = stat_max_active_expire_time_msec < stat_last_active_expire_time_msec ? 
+    stat_max_active_expire_time_msec = stat_max_active_expire_time_msec < stat_last_active_expire_time_msec ?
         stat_last_active_expire_time_msec : stat_max_active_expire_time_msec;
     total_expire_time += stat_last_active_expire_time_msec;
     ++loop_cnt;
@@ -2844,6 +2844,15 @@ int TairHashTypeHvals_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
 
 /* EXHGETALL key */
 int TairHashTypeHgetAll_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    return tairHashTypeHget_RedisCommand(ctx, argv, argc, 0);
+}
+
+/* EXHGETALLWITHVER key */
+int TairHashTypeHgetAllWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    return tairHashTypeHget_RedisCommand(ctx, argv, argc, 1);
+}
+
+int tairHashTypeHget_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc, int returnVer) {
     RedisModule_AutoMemory(ctx);
 
     if (argc != 2) {
@@ -2902,6 +2911,10 @@ int TairHashTypeHgetAll_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         cn++;
         RedisModule_ReplyWithString(ctx, data->value);
         cn++;
+        if (returnVer > 0) {
+            RedisModule_ReplyWithString(ctx, data->version);
+            cn++;
+        }
     }
     m_dictReleaseIterator(di);
 
@@ -3350,6 +3363,7 @@ int Module_CreateCommands(RedisModuleCtx *ctx) {
     CREATE_ROCMD("exhkeys", TairHashTypeHkeys_RedisCommand)
     CREATE_ROCMD("exhvals", TairHashTypeHvals_RedisCommand)
     CREATE_ROCMD("exhgetall", TairHashTypeHgetAll_RedisCommand)
+    CREATE_ROCMD("exhgetallwithver", TairHashTypeHgetAllWithVer_RedisCommand)
     CREATE_ROCMD("exhmget", TairHashTypeHmget_RedisCommand)
     CREATE_ROCMD("exhmgetwithver", TairHashTypeHmgetWithVer_RedisCommand)
     CREATE_ROCMD("exhscan", TairHashTypeHscan_RedisCommand)

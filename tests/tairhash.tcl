@@ -1706,7 +1706,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
 
         catch {r exhexpire tairhashkey field 1 gt 14} err
         assert_match {*ERR*update*version*is*stale*} $err
-        assert_equal 4 [r exhexpire tairhashkey field 1 gt 20]
+        assert_equal 1 [r exhexpire tairhashkey field 1 gt 20]
         assert_equal 20 [r exhver tairhashkey field]
 
         after 1000

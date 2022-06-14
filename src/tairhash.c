@@ -2842,17 +2842,7 @@ int TairHashTypeHvals_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     return REDISMODULE_OK;
 }
 
-/* EXHGETALL key */
-int TairHashTypeHgetAll_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    return tairHashTypeHget_RedisCommand(ctx, argv, argc, 0);
-}
-
-/* EXHGETALLWITHVER key */
-int TairHashTypeHgetAllWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    return tairHashTypeHget_RedisCommand(ctx, argv, argc, 1);
-}
-
-int tairHashTypeHget_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc, int returnVer) {
+int tairHashTypeGetAll_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc, int returnVer) {
     RedisModule_AutoMemory(ctx);
 
     if (argc != 2) {
@@ -2898,6 +2888,7 @@ int tairHashTypeHget_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
     while ((de = m_dictNext(di)) != NULL) {
         skey = (RedisModuleString *)dictGetKey(de);
         data = (TairHashVal *)dictGetVal(de);
+
 #ifdef SORT_MODE
         if (isExpire(data->expire)) {
             continue;
@@ -2912,7 +2903,7 @@ int tairHashTypeHget_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         RedisModule_ReplyWithString(ctx, data->value);
         cn++;
         if (returnVer > 0) {
-            RedisModule_ReplyWithString(ctx, data->version);
+            RedisModule_ReplyWithLongLong(ctx, data->version);
             cn++;
         }
     }
@@ -2923,6 +2914,16 @@ int tairHashTypeHget_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
 #endif
     RedisModule_ReplySetArrayLength(ctx, cn);
     return REDISMODULE_OK;
+}
+
+/* EXHGETALL key */
+int TairHashTypeHgetAll_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    return tairHashTypeGetAll_RedisCommand(ctx, argv, argc, 0);
+}
+
+/* EXHGETALLWITHVER key */
+int TairHashTypeHgetAllWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    return tairHashTypeGetAll_RedisCommand(ctx, argv, argc, 1);
 }
 
 static int parseScanCursor(RedisModuleString *cs, unsigned long *cursor) {

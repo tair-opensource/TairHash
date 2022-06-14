@@ -1711,7 +1711,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
 
         after 1000
 
-        assert_equal 1 [r exhget tairhashkey field]
+        assert_equal {} [r exhget tairhashkey field]
         assert_equal -1 [r exhver tairhashkey field]
     }
     

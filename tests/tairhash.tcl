@@ -1692,6 +1692,12 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         catch {r exhset tairhashkey field 1 ver 0 abs 11} err
         assert_match {*ERR*syntax*error*} $err
 
+        catch {r exhset tairhashkey field 1 abs 0} err
+        assert_match {*ERR*syntax*error*} $err
+
+        catch {r exhset tairhashkey field 1 gt 0} err
+        assert_match {*ERR*syntax*error*} $err
+
         assert_equal 1 [r exhset tairhashkey field 1 abs 10]
 
         catch {r exhset tairhashkey field 2 gt 9} err

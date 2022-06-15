@@ -2887,7 +2887,7 @@ int TairHashTypeHvals_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     return REDISMODULE_OK;
 }
 
-int tairHashTypeGetAll_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc, int returnVer) {
+int tairHashGetAllGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int argc, int returnVer) {
     RedisModule_AutoMemory(ctx);
 
     if (argc != 2) {

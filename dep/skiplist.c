@@ -79,9 +79,7 @@ m_zskiplistNode *m_zslInsert(m_zskiplist *zsl, long long score, RedisModuleStrin
     for (i = zsl->level - 1; i >= 0; i--) {
         /* store rank that is crossed to reach the insert position */
         rank[i] = i == (zsl->level - 1) ? 0 : rank[i + 1];
-        while (x->level[i].forward && 
-            (x->level[i].forward->score < score || 
-            (x->level[i].forward->score == score && RedisModule_StringCompare(x->level[i].forward->member, member) < 0))) {
+        while (x->level[i].forward && (x->level[i].forward->score < score || (x->level[i].forward->score == score && RedisModule_StringCompare(x->level[i].forward->member, member) < 0))) {
             rank[i] += x->level[i].span;
             x = x->level[i].forward;
         }
@@ -160,9 +158,7 @@ int m_zslDelete(m_zskiplist *zsl, long long score, RedisModuleString *member, m_
 
     x = zsl->header;
     for (i = zsl->level - 1; i >= 0; i--) {
-        while (x->level[i].forward && 
-        (x->level[i].forward->score < score || 
-        (x->level[i].forward->score == score && RedisModule_StringCompare(x->level[i].forward->member, member) < 0))) {
+        while (x->level[i].forward && (x->level[i].forward->score < score || (x->level[i].forward->score == score && RedisModule_StringCompare(x->level[i].forward->member, member) < 0))) {
             x = x->level[i].forward;
         }
         update[i] = x;
@@ -192,7 +188,7 @@ int m_zslDelete(m_zskiplist *zsl, long long score, RedisModuleString *member, m_
  * element, which is more costly.
  *
  * The function returns the updated element skiplist node pointer. */
-m_zskiplistNode *m_zslUpdateScore(m_zskiplist *zsl, long long  curscore, RedisModuleString *member, long long  newscore) {
+m_zskiplistNode *m_zslUpdateScore(m_zskiplist *zsl, long long curscore, RedisModuleString *member, long long newscore) {
     m_zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
     int i;
 
@@ -200,9 +196,7 @@ m_zskiplistNode *m_zslUpdateScore(m_zskiplist *zsl, long long  curscore, RedisMo
      * we'll have to update or remove it. */
     x = zsl->header;
     for (i = zsl->level - 1; i >= 0; i--) {
-        while (x->level[i].forward && 
-            (x->level[i].forward->score < curscore || 
-            (x->level[i].forward->score == curscore && RedisModule_StringCompare(x->level[i].forward->member, member) < 0))) {
+        while (x->level[i].forward && (x->level[i].forward->score < curscore || (x->level[i].forward->score == curscore && RedisModule_StringCompare(x->level[i].forward->member, member) < 0))) {
             x = x->level[i].forward;
         }
         update[i] = x;
@@ -368,15 +362,14 @@ unsigned long m_zslDeleteRangeByRank(m_zskiplist *zsl, unsigned int start, unsig
     return removed;
 }
 
-m_zskiplistNode* m_zslGetElementByRank(m_zskiplist *zsl, unsigned long rank) {
+m_zskiplistNode *m_zslGetElementByRank(m_zskiplist *zsl, unsigned long rank) {
     m_zskiplistNode *x;
     unsigned long traversed = 0;
     int i;
 
     x = zsl->header;
-    for (i = zsl->level-1; i >= 0; i--) {
-        while (x->level[i].forward && (traversed + x->level[i].span) <= rank)
-        {
+    for (i = zsl->level - 1; i >= 0; i--) {
+        while (x->level[i].forward && (traversed + x->level[i].span) <= rank) {
             traversed += x->level[i].span;
             x = x->level[i].forward;
         }

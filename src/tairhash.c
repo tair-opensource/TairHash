@@ -605,7 +605,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
 
     // clang-format off
     stat_last_active_expire_time_msec = RedisModule_Milliseconds() - start;
-    stat_max_active_expire_time_msec = stat_max_active_expire_time_msec < stat_last_active_expire_time_msec ? 
+    stat_max_active_expire_time_msec = stat_max_active_expire_time_msec < stat_last_active_expire_time_msec ?
         stat_last_active_expire_time_msec : stat_max_active_expire_time_msec;
     total_expire_time += stat_last_active_expire_time_msec;
     ++loop_cnt;
@@ -946,7 +946,7 @@ int tairHashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
                 ex_flags |= TAIR_HASH_SET_WITH_VER;
                 version_p = next;
                 j++;
-            } else if (!mstrcasecmp(argv[4], "abs") && !(ex_flags & TAIR_HASH_SET_WITH_VER)  && !(ex_flags & TAIR_HASH_SET_WITH_GT_VER) && next) {
+            } else if (!mstrcasecmp(argv[4], "abs") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && !(ex_flags & TAIR_HASH_SET_WITH_GT_VER) && next) {
                 ex_flags |= TAIR_HASH_SET_WITH_ABS_VER;
                 version_p = next;
                 j++;
@@ -1037,7 +1037,7 @@ int tairHashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
         if (ex_flags & (TAIR_HASH_SET_WITH_ABS_VER | TAIR_HASH_SET_WITH_GT_VER)) {
             tair_hash_val->version = version;
         } else {
-             tair_hash_val->version += 1;
+            tair_hash_val->version += 1;
         }
 
         size_t vlen = 0, VSIZE_MAX = 5;
@@ -1789,7 +1789,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
             ex_flags |= TAIR_HASH_SET_ABS_EXPIRE;
             expire_p = next;
             j++;
-        } else if (!mstrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER)  && !(ex_flags & TAIR_HASH_SET_WITH_GT_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && !(ex_flags & TAIR_HASH_SET_WITH_GT_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_VER;
             version_p = next;
             j++;
@@ -1797,7 +1797,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
             ex_flags |= TAIR_HASH_SET_WITH_ABS_VER;
             version_p = next;
             j++;
-         } else if (!mstrcasecmp(argv[j], "gt") && !(ex_flags & TAIR_HASH_SET_WITH_VER)  && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "gt") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_GT_VER;
             version_p = next;
             j++;
@@ -1893,7 +1893,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
             if (version != 0 && version != tair_hash_val->version) {
                 RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION);
                 return REDISMODULE_ERR;
-            } 
+            }
         } else if (ex_flags & TAIR_HASH_SET_WITH_GT_VER) {
             if (version <= tair_hash_val->version) {
                 RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION);
@@ -2019,7 +2019,7 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
             ex_flags |= TAIR_HASH_SET_ABS_EXPIRE;
             expire_p = next;
             j++;
-        } else if (!mstrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER)  && !(ex_flags & TAIR_HASH_SET_WITH_GT_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && !(ex_flags & TAIR_HASH_SET_WITH_GT_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_VER;
             version_p = next;
             j++;
@@ -2027,7 +2027,7 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
             ex_flags |= TAIR_HASH_SET_WITH_ABS_VER;
             version_p = next;
             j++;
-        } else if (!mstrcasecmp(argv[j], "gt") && !(ex_flags & TAIR_HASH_SET_WITH_VER)  && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "gt") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_GT_VER;
             version_p = next;
             j++;

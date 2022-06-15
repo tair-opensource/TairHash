@@ -30,8 +30,8 @@
 #ifndef __UTIL_H_
 #define __UTIL_H_
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* The maximum number of characters needed to represent a long double
  * as a string (long double has a huge range).

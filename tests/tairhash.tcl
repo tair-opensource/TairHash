@@ -425,7 +425,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         create_big_tairhash_with_expire k2 10000 100
         create_big_tairhash_with_expire k3 10000 100
 
-        r flushall async 
+        r flushall async
 
         assert_equal 0 [r dbsize]
 
@@ -461,7 +461,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         r rename exk2 exk2_2
 
         after 3000
-        assert_equal 0 [r dbsize]   
+        assert_equal 0 [r dbsize]
     }
 
     test {Move with active expire} {
@@ -482,9 +482,9 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal 2 [r dbsize]
 
         after 3000
-        assert_equal 0 [r dbsize]  
-        r select 8 
-        assert_equal 0 [r dbsize]  
+        assert_equal 0 [r dbsize]
+        r select 8
+        assert_equal 0 [r dbsize]
     }
 
     test {Active expire rdb} {
@@ -516,7 +516,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
 
         set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
-        
+
         r bgsave
         waitForBgsave r
         r debug reload
@@ -560,9 +560,9 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
     #     r select 7
     #     r del tairhashkey
     #     create_big_tairhash_with_expire tairhashkey 10 2
-        
+
     #     r swapdb 7 13
-    #     r swapdb 13 14 
+    #     r swapdb 13 14
 
     #     r select 14
     #     assert_equal 1 [r dbsize]
@@ -1280,7 +1280,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
     #     r select 11
     #     assert_equal 3 [r dbsize]
     #     after 3000
-    #     assert_equal 0 [r dbsize]   
+    #     assert_equal 0 [r dbsize]
 
     #     set info [r exhexpireinfo]
     #     assert { [string match "*db: 11, active_expired_fields: 30*" $info] }
@@ -1295,7 +1295,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
     #     r swapdb 12 10
 
     #     after 3000
-    #     assert_equal 0 [r dbsize]   
+    #     assert_equal 0 [r dbsize]
     #     set info [r exhexpireinfo]
     #     assert { [string match "*db: 10, active_expired_fields: 60*db: 12, active_expired_fields: 30*" $info] }
     # }
@@ -1426,7 +1426,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
 
         assert_equal 1 [r exhset tairhashkey field1 val1 EX 1]
         assert_equal 1 [r exhset tairhashkey field2 val2 EX 1]
-        
+
         assert_equal 1 [r exhpersist tairhashkey field1]
 
         after 3000
@@ -1580,7 +1580,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal -1 [r exhttl exhashkey field]
 
         r del exhashkey
-        
+
         assert_equal 1 [r exhset exhashkey field val ex 3]
         assert_equal 0 [r exhset exhashkey field val keepttl]
         set ttl [r exhttl exhashkey field]
@@ -1603,7 +1603,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal -1 [r exhttl exhashkey field]
 
         r del exhashkey
-        
+
         assert_equal 1 [r exhincrby exhashkey field 1 ex 3]
         assert_equal 2 [r exhincrby exhashkey field 1 keepttl]
         set ttl [r exhttl exhashkey field]
@@ -1626,7 +1626,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal -1 [r exhttl exhashkey field]
 
         r del exhashkey
-        
+
         assert_equal 1 [r exhincrbyfloat exhashkey field 1 ex 3]
         assert_equal 2 [r exhincrbyfloat exhashkey field 1 keepttl]
         set ttl [r exhttl exhashkey field]
@@ -1662,7 +1662,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
        r del exhashkey
        r select 1
        r del exhashkey2
-       
+
        set rd1 [redis_deferring_client]
        set rd2 [redis_deferring_client]
 
@@ -1674,7 +1674,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
 
        r select 1
        assert_equal 1 [r exhset exhashkey2 foo bar ex 1]
-       
+
        after 2000
        assert_equal {pmessage tairhash* tairhash@0@exhashkey__:expired foo} [$rd1 read]
        assert_equal {pmessage tairhash* tairhash@1@exhashkey2__:expired foo} [$rd1 read]
@@ -1723,7 +1723,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal {} [r exhget tairhashkey field]
         assert_equal -1 [r exhver tairhashkey field]
     }
-    
+
     start_server {tags {"tairhash repl"} overrides {bind 0.0.0.0}} {
         r module load $testmodule
         set slave [srv 0 client]
@@ -2059,8 +2059,8 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
             #     assert_equal 3 [$slave dbsize]
 
             #     after 3000
-            #     assert_equal 0 [$master dbsize]   
-            #     assert_equal 0 [$slave dbsize]  
+            #     assert_equal 0 [$master dbsize]
+            #     assert_equal 0 [$slave dbsize]
             # }
         }
     }

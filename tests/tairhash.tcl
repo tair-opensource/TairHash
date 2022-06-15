@@ -1102,14 +1102,14 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal [lsort [r exhvals tairhashkey]] [lsort {val1 val2 val3}]
         assert_equal [lsort [r exhkeys tairhashkey]] [lsort {field1 field2 field3}]
         assert_equal [lsort [r exhgetall tairhashkey]] [lsort {field1 val1 field2 val2 field3 val3}]
-        assert_equal [lsort [r exhgetallwithver tairhashkey]] [lsort {field1 val1 100 field2 val2 200 field3 val3}]
+        assert_equal [lsort [r exhgetallwithver tairhashkey]] [lsort {field1 val1 1 field2 val2 1 field3 val3 1}]
 
         after 300
 
         assert_equal [lsort [r exhvals tairhashkey]] [lsort {val3}]
         assert_equal [lsort [r exhkeys tairhashkey]] [lsort {field3}]
         assert_equal [lsort [r exhgetall tairhashkey]] [lsort {field3 val3}]
-        assert_equal [lsort [r exhgetallwithver tairhashkey]] [lsort {field3 val3}]
+        assert_equal [lsort [r exhgetallwithver tairhashkey]] [lsort {field3 val3 1}]
     }
 
     test {Exhmget} {
@@ -1768,14 +1768,14 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
                 assert_equal [lsort [$slave exhvals tairhashkey]] [lsort {val1 val2 val3}]
                 assert_equal [lsort [$slave exhkeys tairhashkey]] [lsort {field1 field2 field3}]
                 assert_equal [lsort [$slave exhgetall tairhashkey]] [lsort {field1 val1 field2 val2 field3 val3}]
-                assert_equal [lsort [$slave exhgetallwithver tairhashkey]] [lsort {field1 val1 100 field2 val2 200 field3 val3}]
+                assert_equal [lsort [$slave exhgetallwithver tairhashkey]] [lsort {field1 val1 1 field2 val2 1 field3 val3 1}]
 
                 after 500
 
                 assert_equal [lsort [$slave exhvals tairhashkey]] [lsort {val3}]
                 assert_equal [lsort [$slave exhkeys tairhashkey]] [lsort {field3}]
                 assert_equal [lsort [$slave exhgetall tairhashkey]] [lsort {field3 val3}]
-                assert_equal [lsort [$slave exhgetallwithver tairhashkey]] [lsort {field3 val3}]
+                assert_equal [lsort [$slave exhgetallwithver tairhashkey]] [lsort {field3 val3 1}]
             }
 
             test {Active expire master-slave} {

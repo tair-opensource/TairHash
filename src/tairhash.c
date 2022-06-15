@@ -2962,12 +2962,12 @@ int tairHashGetAllGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
 
 /* EXHGETALL key */
 int TairHashTypeHgetAll_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    return tairHashTypeGetAll_RedisCommand(ctx, argv, argc, 0);
+    return tairHashGetAllGenericFunc(ctx, argv, argc, 0);
 }
 
 /* EXHGETALLWITHVER key */
 int TairHashTypeHgetAllWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
-    return tairHashTypeGetAll_RedisCommand(ctx, argv, argc, 1);
+    return tairHashGetAllGenericFunc(ctx, argv, argc, 1);
 }
 
 static int parseScanCursor(RedisModuleString *cs, unsigned long *cursor) {

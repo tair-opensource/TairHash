@@ -4,12 +4,12 @@ ENV TAIRHASH_URL https://github.com/alibaba/TairHash.git
 RUN set -ex; \
     \
     BUILD_DEPS=' \
-        ca-certificates \
-        cmake \
-        gcc \
-        git \
-        g++ \
-        make \
+    ca-certificates \
+    cmake \
+    gcc \
+    git \
+    g++ \
+    make \
     '; \
     apt-get update; \
     apt-get install -y $BUILD_DEPS --no-install-recommends; \

@@ -22,7 +22,7 @@
 - 支持field过期删除事件通知（基于pubsub）
 
 ## 数据结构
-![avatar](imgs/tairhash_index2.png)  
+![avatar](imgs/tairhash_index2.png)
 
 ## 主动过期
 ### SORT_MODE（排序模式）：
@@ -37,7 +37,7 @@
 - 排序中所有的key和field都是指针引用，无内存拷贝，无内存膨胀问题
 
 **支持的redis版本**: redis >= 7.0
-**优点**：过期淘汰效率比较高    
+**优点**：过期淘汰效率比较高
 **缺点**：由于SORT_MODE实现依赖`unlink2`回调函数(见这个[PR](https://github.com/redis/redis/pull/8999)))同步释放索引结构，因此需要较高的redis版本支持。
 
 **使用方式**：cmake的时候加上`-DSORT_MODE=yes`选项，并重新编译
@@ -48,13 +48,13 @@
 - 每一次读写field，也会触发对这个field自身的过期淘汰操作
 - 排序中所有的key和field都是指针引用，无内存拷贝，无内存膨胀问题
 
-**支持的redis版本**: redis >= 5.0  
-**优点**：可以运行在低版本的redis中（redis >= 5.0 ）      
-**缺点**：过期淘汰效率较低（相对SORT模式而言）  
+**支持的redis版本**: redis >= 5.0
+**优点**：可以运行在低版本的redis中（redis >= 5.0 ）
+**缺点**：过期淘汰效率较低（相对SORT模式而言）
 
 **使用方式**：cmake的时候加上`-DSORT_MODE=no`选项，并重新编译
 
-## 事件通知  
+## 事件通知
 
 tairhash在field发生过期时（由主动或被动过期触发）会发送一个事件通知，通知以pubsub方式发送，channel的格式为：`tairhash@<db>@<key>__:<event>` , 目前只支持expired事件类型，因此
 channel为：`tairhash@<db>@<key>__:expired`，消息内容为过期的field。
@@ -100,7 +100,7 @@ OK
 (integer) 0
 127.0.0.1:6379> EXHVER k f
 (integer) 2
-```  
+```
 
 ## Docker
 ```
@@ -109,15 +109,15 @@ docker run -p 6379:6379 tairmodule/tairhash:latest
 ## 编译及使用
 
 ```
-mkdir build  
-cd build  
+mkdir build
+cd build
 cmake ../ && make -j
 ```
 编译成功后会在lib目录下产生tairhash_module.so库文件
 
 ```
 ./redis-server --loadmodule /path/to/tairhash_module.so
-```  
+```
 ## 测试方法
 
 1. 修改`tests`目录下tairhash.tcl文件中的路径为`set testmodule [file your_path/tairhash_module.so]`
@@ -133,8 +133,8 @@ cmake ../ && make -j
 
 ## 我们的modules
 
-[TairHash](https://github.com/alibaba/TairHash): 和redis hash类似，但是可以为field设置expire和version，支持高效的主动过期和被动过期   
-[TairZset](https://github.com/alibaba/TairZset): 和redis zset类似，但是支持多（最大255）维排序，同时支持incrby语义，非常适合游戏排行榜场景   
-[TairString](https://github.com/alibaba/TairString): 和redis string类似，但是支持设置expire和version，并提供CAS/CAD等实用命令，非常适用于分布式锁等场景  
+[TairHash](https://github.com/alibaba/TairHash): 和redis hash类似，但是可以为field设置expire和version，支持高效的主动过期和被动过期
+[TairZset](https://github.com/alibaba/TairZset): 和redis zset类似，但是支持多（最大255）维排序，同时支持incrby语义，非常适合游戏排行榜场景
+[TairString](https://github.com/alibaba/TairString): 和redis string类似，但是支持设置expire和version，并提供CAS/CAD等实用命令，非常适用于分布式锁等场景
 
 

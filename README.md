@@ -8,7 +8,7 @@
 <div align=center>
 <img src="imgs/tairhash_logo.jpg" width="500"/>
 </div>
-   
+
 
 ## Introduction  [中文说明](README-CN.md)
      TairHash is a hash data structure developed based on the redis module. TairHash not only has the same rich data interface and high performance as the native hash, but also can set the expiration and version for the field. TairHash provides an active expiration mechanism, even if the field is not accessed after expiration, it can be actively deleted to release the memory.
@@ -23,7 +23,7 @@
 - Support field expired event notification (based on pubsub)
 
 ## Data structure
-![avatar](imgs/tairhash_index2.png)  
+![avatar](imgs/tairhash_index2.png)
 ## Active expiration
 ### SORT_MODE：
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
@@ -35,9 +35,9 @@
 
 **Supported redis version**: redis >= 7.0
 
-**Advantages**: higher efficiency of expire elimination     
+**Advantages**: higher efficiency of expire elimination
 
-**Disadvantages**: Because the SORT_MODE implementation relies on the `unlink2` callback function (see this [PR](https://github.com/redis/redis/pull/8999))) to release the index structure synchronously, So currently only supports redis >= 7.0 and unstable branch  
+**Disadvantages**: Because the SORT_MODE implementation relies on the `unlink2` callback function (see this [PR](https://github.com/redis/redis/pull/8999))) to release the index structure synchronously, So currently only supports redis >= 7.0 and unstable branch
 
 **Usag**e: cmake with `-DSORT_MODE=yes` option, and recompile
 
@@ -50,13 +50,13 @@
 
 **Supported redis version**: redis >= 5.0
 
-**Advantages**: can run in the low version of redis (redis >= 5.0)  
+**Advantages**: can run in the low version of redis (redis >= 5.0)
 
-**Disadvantages**: low efficiency of expire elimination (compared with SORT mode)  
+**Disadvantages**: low efficiency of expire elimination (compared with SORT mode)
 
 **Usage**: cmake with `-DSORT_MODE=no` option, and recompile
 
-## Event notification   
+## Event notification
 
 tairhash will send an event notification when the field expires (triggered by active or passive expiration). The notification is sent in pubsub mode. The format of the channel is: `tairhash@<db>@<key>__:<event>` , currently only supports expired event type, so
 The channel is: `tairhash@<db>@<key>__:expired`, and the message content is the expired field.
@@ -102,7 +102,7 @@ OK
 (integer) 0
 127.0.0.1:6379> EXHVER k f
 (integer) 2
-```  
+```
 
 ## Docker
 ```
@@ -111,15 +111,15 @@ docker run -p 6379:6379 tairmodule/tairhash:latest
 ## BUILD
 
 ```
-mkdir build  
-cd build  
+mkdir build
+cd build
 cmake ../ && make -j
 ```
 then the tairhash_module.so library file will be generated in the lib directory
 
 ```
 ./redis-server --loadmodule /path/to/tairhash_module.so
-```  
+```
 ## TEST
 
 1. Modify the path in the tairhash.tcl file in the `tests` directory to `set testmodule [file your_path/tairhash_module.so]`
@@ -135,6 +135,6 @@ then the tairhash_module.so library file will be generated in the lib directory
 
 
 ### Our modules
-[TairHash](https://github.com/alibaba/TairHash): A redis module, similar to redis hash, but you can set expire and version for the field  
-[TairZset](https://github.com/alibaba/TairZset): A redis module, similar to redis zset, but you can set multiple scores for each member to support multi-dimensional sorting  
-[TairString](https://github.com/alibaba/TairString): A redis module, similar to redis string, but you can set expire and version for the value. It also provides many very useful commands, such as cas/cad, etc.  
+[TairHash](https://github.com/alibaba/TairHash): A redis module, similar to redis hash, but you can set expire and version for the field
+[TairZset](https://github.com/alibaba/TairZset): A redis module, similar to redis zset, but you can set multiple scores for each member to support multi-dimensional sorting
+[TairString](https://github.com/alibaba/TairString): A redis module, similar to redis string, but you can set expire and version for the value. It also provides many very useful commands, such as cas/cad, etc.

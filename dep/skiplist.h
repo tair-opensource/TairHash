@@ -11,7 +11,7 @@ typedef struct {
 } m_zrangespec;
 
 typedef struct m_zskiplistNode {
-    RedisModuleString *member; 
+    RedisModuleString *member;
     long long score;
     struct m_zskiplistNode *backward;
     struct zskiplistLevel {
@@ -35,6 +35,6 @@ m_zskiplistNode *m_zslLastInRange(m_zskiplist *zsl, m_zrangespec *range);
 int m_zslValueGteMin(long long value, m_zrangespec *spec);
 int m_zslValueLteMax(long long value, m_zrangespec *spec);
 void m_zslDeleteNode(m_zskiplist *zsl, m_zskiplistNode *x, m_zskiplistNode **update);
-m_zskiplistNode *m_zslUpdateScore(m_zskiplist *zsl, long long  curscore, RedisModuleString *member, long long newscore);
-m_zskiplistNode* m_zslGetElementByRank(m_zskiplist *zsl, unsigned long rank);
+m_zskiplistNode *m_zslUpdateScore(m_zskiplist *zsl, long long curscore, RedisModuleString *member, long long newscore);
+m_zskiplistNode *m_zslGetElementByRank(m_zskiplist *zsl, unsigned long rank);
 unsigned long m_zslDeleteRangeByRank(m_zskiplist *zsl, unsigned int start, unsigned int end);

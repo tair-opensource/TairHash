@@ -859,10 +859,10 @@ Return：
 127.0.0.1:6379> EXHGETALLWITHVER k0
 1) "f2"
 2) "2"
-3) "1"
+3) (integer) 1
 4) "f1"
 5) "1"
-6) "2"
+6) (integer) 2
 ```
 
 #### EXHSCAN

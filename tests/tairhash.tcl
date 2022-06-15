@@ -1683,6 +1683,47 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
        $rd2 close
     }
 
+    test {Exhash GT version} {
+        r del exhashkey
+
+        catch {r exhset tairhashkey field 1 abs 10 gt 11} err
+        assert_match {*ERR*syntax*error*} $err
+
+        catch {r exhset tairhashkey field 1 ver 0 gt 11} err
+        assert_match {*ERR*syntax*error*} $err
+
+        catch {r exhset tairhashkey field 1 ver 0 abs 11} err
+        assert_match {*ERR*syntax*error*} $err
+
+        catch {r exhset tairhashkey field 1 abs 0} err
+        assert_match {*ERR*syntax*error*} $err
+
+        catch {r exhset tairhashkey field 1 gt 0} err
+        assert_match {*ERR*syntax*error*} $err
+
+        assert_equal 1 [r exhset tairhashkey field 1 abs 10]
+
+        catch {r exhset tairhashkey field 2 gt 9} err
+        assert_match {*ERR*update*version*is*stale*} $err
+        assert_equal 0 [r exhset tairhashkey field 2 gt 13]
+        assert_equal 13 [r exhver  tairhashkey field]
+
+        catch {r exhincrby tairhashkey field 2 gt 13} err
+        assert_match {*ERR*update*version*is*stale*} $err
+        assert_equal 4 [r exhincrby tairhashkey field 2 gt 14]
+        assert_equal 14 [r exhver  tairhashkey field]
+
+        catch {r exhexpire tairhashkey field 1 gt 14} err
+        assert_match {*ERR*update*version*is*stale*} $err
+        assert_equal 1 [r exhexpire tairhashkey field 1 gt 20]
+        assert_equal 20 [r exhver tairhashkey field]
+
+        after 1000
+
+        assert_equal {} [r exhget tairhashkey field]
+        assert_equal -1 [r exhver tairhashkey field]
+    }
+
     start_server {tags {"tairhash repl"} overrides {bind 0.0.0.0}} {
         r module load $testmodule
         set slave [srv 0 client]

@@ -7,7 +7,7 @@
 语法及复杂度：
 
 
-> EXHSET key field value [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS version] [KEEPTTL]  
+> EXHSET key field value [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS/GT version] [KEEPTTL]  
 > 时间复杂度：O(1)
 
 
@@ -15,7 +15,7 @@
 命令描述：
 
 
-> 向key指定的TairHash中插入一个field，如果TairHash不存在则自动创建一个，如果field已经存在则覆盖其值。在插入的时候，可以使用EX/EXAT/PX/PXAT给field设置过期时间，当field过期后会被主动（active expire）或被动（passivity expire）删除掉。如果指定了NX选项，则只有在field不存在的时候才会插入成功，同理，如果指定了XX选项，则只有在field存在的时候才能插入成功。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以插入成功，如果field不存在或者field当前版本为0则不进行检查，总是可以插入成功。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功, ABS指定的版本号不能为0。该命令会触发对field的被动淘汰检查
+> 向key指定的TairHash中插入一个field，如果TairHash不存在则自动创建一个，如果field已经存在则覆盖其值。在插入的时候，可以使用EX/EXAT/PX/PXAT给field设置过期时间，当field过期后会被主动（active expire）或被动（passivity expire）删除掉。如果指定了NX选项，则只有在field不存在的时候才会插入成功，同理，如果指定了XX选项，则只有在field存在的时候才能插入成功。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以插入成功，如果field不存在或者field当前版本为0则不进行检查，总是可以插入成功。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0
 
 
 
@@ -30,7 +30,7 @@
 > PX: 指定field的相对过期时间，单位为毫秒，0表示立刻过期
 > PXAT: 指定field的绝对过期时间，单位为毫秒 ，0表示立刻过期
 > NX/XX: NX表示当要插入的field不存在的时候才允许插入，XX表示只有当field存在的时候才允许插入  
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号    
+> VER/ABS/GT: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0  
 > KEEPTTL: 当未指定EX/EXAT/PX/PXAT时保留field的过期时间
 
 返回值：
@@ -116,7 +116,7 @@
 语法及复杂度：
 
 
-> EXHPEXPIREAT key field milliseconds-timestamp [VER/ABS version]   
+> EXHPEXPIREAT key field milliseconds-timestamp [VER/ABS/GT version]   
 > 时间复杂度：O(1)  
 
 
@@ -124,7 +124,7 @@
 命令描述：
 
 
-> 在key指定的TairHash中为一个field设置绝对过期时间，单位为毫秒。当过期时间到时，该field会被主动删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，注意版本号不能为0。该命令会触发对field的被动淘汰检查  
+> 在key指定的TairHash中为一个field设置绝对过期时间，单位为毫秒。当过期时间到时，该field会被主动删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0
 
 
 
@@ -134,7 +134,7 @@
 > key: 用于查找该TairHash的键    
 > field: TairHash中的一个元素    
 > milliseconds-timestamp: 以毫秒为单位的时间戳，0表示立刻过期   
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号    
+> VER/ABS/GT: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0
 
 
 返回值：
@@ -151,7 +151,7 @@
 语法及复杂度：
 
 
-> EXHPEXPIRE key field milliseconds [VER/ABS version]  
+> EXHPEXPIRE key field milliseconds [VER/ABS/GT version]  
 > 时间复杂度：O(1)  
 
 
@@ -159,9 +159,7 @@
 命令描述：
 
 
-> 在key指定的TairHash中为一个field设置相对过期时间，单位为毫秒。当过期时间到时，该field会被主动删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，注意版本号不能为0。该命令会触发对field的被动淘汰  
-
-
+> 在key指定的TairHash中为一个field设置相对过期时间，单位为毫秒。当过期时间到时，该field会被主动删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0
 
 参数：
 
@@ -169,7 +167,7 @@
 > key: 用于查找该TairHash的键    
 > field: TairHash中的一个元素    
 > milliseconds: 以毫秒为单位的过期时间，0表示立刻过期       
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号    
+> VER/ABS/GT: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0
 
 
 返回值：
@@ -186,7 +184,7 @@
 语法及复杂度：
 
 
-> EXHEXPIREAT key field timestamp [VER/ABS version]  
+> EXHEXPIREAT key field timestamp [VER/ABS/GT version]  
 > 时间复杂度：O(1)  
 
 
@@ -194,7 +192,7 @@
 命令描述：
 
 
-> 在key指定的TairHash中为一个field设置绝对过期时间，单位为秒，当过期时间到时，该field会被主动删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，注意版本号不能为0。该命令会触发对field的被动淘汰  
+> 在key指定的TairHash中为一个field设置绝对过期时间，单位为秒，当过期时间到时，该field会被主动删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0
 
 参数：
 
@@ -202,7 +200,7 @@
 > key: 用于查找该TairHash的键  
 > field: TairHash中的一个元素  
 > timestamp: 以秒为单位的时间戳，0表示立刻过期   
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
+> VER/ABS/GT: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0
 
 
 
@@ -220,7 +218,7 @@
 语法及复杂度：
 
 
-> EXHEXPIRE key field seconds [VER/ABS version]  
+> EXHEXPIRE key field seconds [VER/ABS/GT version]  
 > 时间复杂度：O(1)  
 
 
@@ -228,7 +226,7 @@
 命令描述：
 
 
-> 在key指定的TairHash中为一个field设置相对过期时间，单位为秒，当过期时间到时，该field会被主动删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，注意版本号不能为0。该命令会触发对field的被动淘汰  
+> 在key指定的TairHash中为一个field设置相对过期时间，单位为秒，当过期时间到时，该field会被主动删除。如果field不存在则直接返回0。如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以插入成功，同时将field当前版本号设置为ABS指定的版本号，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0
 
 
 
@@ -238,7 +236,7 @@
 > key: 用于查找该TairHash的键  
 > field: TairHash中的一个元素  
 > seconds: 以秒为单位的过期时间，0表示立刻过期     
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
+> VER/ABS/GT: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0
 
 
 
@@ -424,7 +422,7 @@
 语法及复杂度：
 
 
-> EXHINCRBY key field value [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [KEEPTTL]    
+> EXHINCRBY key field value [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS/GT version] [MIN minval] [MAX maxval] [KEEPTTL]    
 > 时间复杂度：O(1)  
 
 
@@ -433,7 +431,7 @@
 
 
 > 将key指定的TairHash中一个field的值加上整数value。如果TairHash不存在则自动新创建一个，如果指定的field不存在，则在加之前先将field的值初始化为0。同时还可以使用EX/EXAT/PX/PXAT为field设置过期时间。  
-> 如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以设置成功，同时将field当前版本号设置为ABS指定的版本号，注意ABS指定的版本号不能为0。MIN/MAX用户给field提供一个边界，只有本次incr操作后field的值还在此边界时incr才会被执行，否则返回overflow的错误。该命令会触发对field的被动淘汰检查  
+> 如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以设置成功，同时将field当前版本号设置为ABS指定的版本号，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0，MIN/MAX用户给field提供一个边界，只有本次incr操作后field的值还在此边界时incr才会被执行，否则返回overflow的错误
 
 
 
@@ -447,7 +445,7 @@
 > EXAT: 指定field的绝对过期时间，单位为秒 ，0表示立刻过期
 > PX: 指定field的相对过期时间，单位为毫秒，0表示立刻过期
 > PXAT: 指定field的绝对过期时间，单位为毫秒，0表示立刻过期
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
+> VER/ABS/GT: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0
 > MAX/MIN: 设置最大最小边界，本次incr操作后，field的值在此边界时incr才会被执行，否则返回overflow的错误。
 > KEEPTTL: 当未指定EX/EXAT/PX/PXAT时保留field的过期时间
 
@@ -465,7 +463,7 @@
 语法及复杂度：
 
 
-> EXHINCRBYFLOAT key field value [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [KEEPTTL]   
+> EXHINCRBYFLOAT key field value [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS/GT version] [MIN minval] [MAX maxval] [KEEPTTL]   
 > 时间复杂度：O(1)  
 
 
@@ -474,7 +472,7 @@
 
 
 > 将key指定的TairHash中一个field的值加上浮点型value。如果TairHash不存在则自动新创建一个，如果指定的field不存在，则在加之前先将field的值初始化为0。同时还可以使用EX/EXAT/PX/PXAT为field设置过期时间。  
-> 如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以设置成功，同时将field当前版本号设置为ABS指定的版本号，注意ABS指定的版本号不能为0。MIN/MAX用户给field提供一个边界，只有本次incr操作后field的值还在此边界时incr才会被执行，否则返回overflow的错误。该命令会触发对field的被动淘汰检查  
+> 如果指定了VER参数，则VER所携带的版本号必须和field当前版本号一致才可以设置成功，或者如果VER参数所携带的版本号为0，则不进行版本校验。ABS参数用于强制给field设置版本号，而不管field当前的版本号，总是可以设置成功，同时将field当前版本号设置为ABS指定的版本号，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0，MIN/MAX用户给field提供一个边界，只有本次incr操作后field的值还在此边界时incr才会被执行，否则返回overflow的错误
 
 
 
@@ -488,7 +486,7 @@
 > EXAT: 指定field的绝对过期时间，单位为秒，0表示立刻过期
 > PX: 指定field的相对过期时间，单位为毫秒，0表示立刻过期
 > PXAT: 指定field的绝对过期时间，单位为毫秒，0表示立刻过期
-> VER/ABS: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号  
+> VER/ABS/GT: VER表示只有指定的版本和field当前的版本一致时才允许设置，如果VER指定的版本为0则表示不进行版本检查，ABS表示无论field当前的版本是多少都强制设置并修改版本号，GT表示只有指定的版本大于当前版本时才允许设置，ABS和GT指定的版本号不能为0
 > MAX/MIN: 设置最大最小边界，本次incr操作后，field的值在此边界时incr才会被执行，否则返回overflow的错误。
 > KEEPTTL: 当未指定EX/EXAT/PX/PXAT时保留field的过期时间
 

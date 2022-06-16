@@ -809,8 +809,61 @@ Return：
 
 > Returns an array, each bit of the array corresponds to the key-value pair of each field in TairHash, if TairHash does not exist, it returns an empty array
 
+```sh
+127.0.0.1:6379> EXHSET k0 f1 1 ABS 2
+(integer) 1
+127.0.0.1:6379> EXHSET k0 f2 2 ABS 1
+(integer) 1
+127.0.0.1:6379> EXHGETALL k0
+1) "f2"
+2) "2"
+3) "f1"
+4) "1"
+```
+
+#### EXHGETALLWITHVER
 
 
+Grammar and complexity：
+
+
+> EXHGETALLWITHVER key
+> time complexity：O(n)
+
+
+
+Command Description：
+
+
+> Get the key-value-version tuples of all fields in TairHash specified by key
+
+
+
+Parameter：
+
+
+> key: The key used to find the TairHash
+
+
+
+Return：
+
+
+> Returns an array, each bit of the array corresponds to the key-value-version tuple of each field in TairHash, if TairHash does not exist, it returns an empty array
+
+```sh
+127.0.0.1:6379> EXHSET k0 f1 1 ABS 2
+(integer) 1
+127.0.0.1:6379> EXHSET k0 f2 2 ABS 1
+(integer) 1
+127.0.0.1:6379> EXHGETALLWITHVER k0
+1) "f2"
+2) "2"
+3) (integer) 1
+4) "f1"
+5) "1"
+6) (integer) 2
+```
 
 #### EXHSCAN
 

@@ -1066,7 +1066,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         lappend rv [string match "ERR*not*float*" $bigerr]
     } {1 1}
 
-    test {Exhkeys / exhvals / exhgetall basic} {
+    test {Exhkeys / exhvals / exhgetall / exhgetallwithver basic} {
         r del tairhashkey
 
         array set tairhashkeyh {}
@@ -1090,9 +1090,10 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal [lsort [r exhvals tairhashkey]] [lsort $expected_vals]
         assert_equal [lsort [r exhgetall tairhashkey]] [lsort [array get tairhashkey]]
         assert_equal [] [r exhgetall tairhashkey_noexists]
+        assert_equal [] [r exhgetallwithver tairhashkey_noexists]
     }
 
-    test {Exhkeys / exhvals / exhgetall while expired fields exist} {
+    test {Exhkeys / exhvals / exhgetall / exhgetallwithver while expired fields exist} {
         r del tairhashkey
         assert_equal 1 [r exhset tairhashkey field1 val1 PX 100]
         assert_equal 1 [r exhset tairhashkey field2 val2 PX 200]
@@ -1101,12 +1102,14 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal [lsort [r exhvals tairhashkey]] [lsort {val1 val2 val3}]
         assert_equal [lsort [r exhkeys tairhashkey]] [lsort {field1 field2 field3}]
         assert_equal [lsort [r exhgetall tairhashkey]] [lsort {field1 val1 field2 val2 field3 val3}]
+        assert_equal [lsort [r exhgetallwithver tairhashkey]] [lsort {field1 val1 1 field2 val2 1 field3 val3 1}]
 
         after 300
 
         assert_equal [lsort [r exhvals tairhashkey]] [lsort {val3}]
         assert_equal [lsort [r exhkeys tairhashkey]] [lsort {field3}]
         assert_equal [lsort [r exhgetall tairhashkey]] [lsort {field3 val3}]
+        assert_equal [lsort [r exhgetallwithver tairhashkey]] [lsort {field3 val3 1}]
     }
 
     test {Exhmget} {
@@ -1794,7 +1797,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
                 assert_equal 10 [$slave exhver tairhashkey field]
             }
 
-            test {Exhgetall master-slave} {
+            test {Exhgetall / exhgetallwithver  master-slave} {
                 $master del tairhashkey
 
                 assert_equal 1 [$master exhset tairhashkey field1 val1 PX 100]
@@ -1806,12 +1809,14 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
                 assert_equal [lsort [$slave exhvals tairhashkey]] [lsort {val1 val2 val3}]
                 assert_equal [lsort [$slave exhkeys tairhashkey]] [lsort {field1 field2 field3}]
                 assert_equal [lsort [$slave exhgetall tairhashkey]] [lsort {field1 val1 field2 val2 field3 val3}]
+                assert_equal [lsort [$slave exhgetallwithver tairhashkey]] [lsort {field1 val1 1 field2 val2 1 field3 val3 1}]
 
                 after 500
 
                 assert_equal [lsort [$slave exhvals tairhashkey]] [lsort {val3}]
                 assert_equal [lsort [$slave exhkeys tairhashkey]] [lsort {field3}]
                 assert_equal [lsort [$slave exhgetall tairhashkey]] [lsort {field3 val3}]
+                assert_equal [lsort [$slave exhgetallwithver tairhashkey]] [lsort {field3 val3 1}]
             }
 
             test {Active expire master-slave} {

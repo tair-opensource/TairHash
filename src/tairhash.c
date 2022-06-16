@@ -2887,8 +2887,7 @@ int TairHashTypeHvals_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     return REDISMODULE_OK;
 }
 
-/* EXHGETALL key */
-int TairHashTypeHgetAll_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+int tairHashGetAllGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int argc, int returnVer) {
     RedisModule_AutoMemory(ctx);
 
     if (argc != 2) {
@@ -2947,6 +2946,10 @@ int TairHashTypeHgetAll_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         cn++;
         RedisModule_ReplyWithString(ctx, data->value);
         cn++;
+        if (returnVer > 0) {
+            RedisModule_ReplyWithLongLong(ctx, data->version);
+            cn++;
+        }
     }
     m_dictReleaseIterator(di);
 
@@ -2955,6 +2958,16 @@ int TairHashTypeHgetAll_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
 #endif
     RedisModule_ReplySetArrayLength(ctx, cn);
     return REDISMODULE_OK;
+}
+
+/* EXHGETALL key */
+int TairHashTypeHgetAll_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    return tairHashGetAllGenericFunc(ctx, argv, argc, 0);
+}
+
+/* EXHGETALLWITHVER key */
+int TairHashTypeHgetAllWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    return tairHashGetAllGenericFunc(ctx, argv, argc, 1);
 }
 
 static int parseScanCursor(RedisModuleString *cs, unsigned long *cursor) {
@@ -3395,6 +3408,7 @@ int Module_CreateCommands(RedisModuleCtx *ctx) {
     CREATE_ROCMD("exhkeys", TairHashTypeHkeys_RedisCommand)
     CREATE_ROCMD("exhvals", TairHashTypeHvals_RedisCommand)
     CREATE_ROCMD("exhgetall", TairHashTypeHgetAll_RedisCommand)
+    CREATE_ROCMD("exhgetallwithver", TairHashTypeHgetAllWithVer_RedisCommand)
     CREATE_ROCMD("exhmget", TairHashTypeHmget_RedisCommand)
     CREATE_ROCMD("exhmgetwithver", TairHashTypeHmgetWithVer_RedisCommand)
     CREATE_ROCMD("exhscan", TairHashTypeHscan_RedisCommand)

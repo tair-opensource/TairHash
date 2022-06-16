@@ -834,6 +834,39 @@
 
 
 
+#### EXHGETALLWITHVER
+
+
+语法及复杂度：
+
+
+> EXHGETALLWITHVER key
+> 时间复杂度：O(n)
+
+
+
+命令描述：
+
+
+> 获取key指定的TairHash中所有field的键值对和版本
+
+
+
+参数：
+
+
+> key: 用于查找该TairHash的键
+
+
+
+返回值：
+
+
+> 成功：返回一个数组，数组的每一位对应TairHash中的每一个field的键值对和版本，如果TairHash不存则返回空的数组
+> 失败：返回相应异常信息
+
+
+
 #### EXHSCAN
 
 

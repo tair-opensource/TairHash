@@ -70,8 +70,8 @@ jobs:
        git checkout 7.0
        make REDIS_CFLAGS='-Werror' BUILD_TLS=yes
     - name: Install LCOV
-        run: |
-          sudo apt-get --assume-yes install lcov > /dev/null
+      run: |
+        sudo apt-get --assume-yes install lcov > /dev/null
     - name: make tairhash
       run: |
        mkdir build
@@ -88,9 +88,9 @@ jobs:
         cd redis
         ./runtest --stack-logging --single unit/type/tairhash
     - name: lcov collection
-        run: |
-          cd build
-          lcov -c -d ./ -o cover.info
+      run: |
+        cd build
+        lcov -c -d ./ -o cover.info
     - uses: codecov/codecov-action@v1
         with:
           file: build/cover.info
@@ -107,9 +107,8 @@ jobs:
        git checkout 7.0
        make REDIS_CFLAGS='-Werror' BUILD_TLS=yes
     - name: Install LCOV
-        shell: bash
-        run: |
-          sudo apt-get --assume-yes install lcov > /dev/null
+      run: |
+        sudo apt-get --assume-yes install lcov > /dev/null
     - name: make tairhash
       run: |
        mkdir build
@@ -126,11 +125,11 @@ jobs:
         cd redis
         ./runtest --stack-logging --single unit/type/tairhash
     - name: lcov collection
-        run: |
-          cd build
-          lcov -c -d ./ -o cover.info
+      run: |
+        cd build
+        lcov -c -d ./ -o cover.info
     - uses: codecov/codecov-action@v1
-        with:
-          file: build/cover.info
+      with:
+        file: build/cover.info
 
         

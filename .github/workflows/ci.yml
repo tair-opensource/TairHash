@@ -94,6 +94,7 @@ jobs:
     - uses: codecov/codecov-action@v1
       with:
         file: build/cover.info
+        token: cbb1ec64-e051-4184-820c-88cf195897c2
 
   test-ubuntu-with-redis-7-sort-mode:
     runs-on: ubuntu-latest
@@ -131,5 +132,6 @@ jobs:
     - uses: codecov/codecov-action@v1
       with:
         file: build/cover.info
+        token: cbb1ec64-e051-4184-820c-88cf195897c2
 
         

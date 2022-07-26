@@ -93,7 +93,7 @@ jobs:
         lcov -c -d ./ -o cover.info
     - uses: codecov/codecov-action@v1
       with:
-      file: build/cover.info
+        file: build/cover.info
 
   test-ubuntu-with-redis-7-sort-mode:
     runs-on: ubuntu-latest
@@ -130,6 +130,6 @@ jobs:
         lcov -c -d ./ -o cover.info
     - uses: codecov/codecov-action@v1
       with:
-      file: build/cover.info
+        file: build/cover.info
 
         

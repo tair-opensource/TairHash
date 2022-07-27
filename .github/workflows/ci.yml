@@ -69,11 +69,14 @@ jobs:
        cd redis
        git checkout 7.0
        make REDIS_CFLAGS='-Werror' BUILD_TLS=yes
+    - name: Install LCOV
+      run: |
+        sudo apt-get --assume-yes install lcov > /dev/null
     - name: make tairhash
       run: |
        mkdir build
        cd build
-       cmake ../
+       cmake ../ -DGCOV_MODE=TRUE
        make 
     - name: test
       run: |
@@ -84,6 +87,15 @@ jobs:
         sed -i 's#unit/type/string#unit/type/tairhash#g' redis/tests/test_helper.tcl
         cd redis
         ./runtest --stack-logging --single unit/type/tairhash
+    - name: lcov collection
+      run: |
+        cd build
+        lcov -c -d ./ -o cover.info
+    - uses: codecov/codecov-action@v1
+      with:
+        file: build/cover.info
+        token: ${{ secrets.CODECOV_TOKEN }}
+        verbose: true
 
   test-ubuntu-with-redis-7-sort-mode:
     runs-on: ubuntu-latest
@@ -96,6 +108,9 @@ jobs:
        cd redis
        git checkout 7.0
        make REDIS_CFLAGS='-Werror' BUILD_TLS=yes
+    - name: Install LCOV
+      run: |
+        sudo apt-get --assume-yes install lcov > /dev/null
     - name: make tairhash
       run: |
        mkdir build
@@ -111,5 +126,12 @@ jobs:
         sed -i 's#unit/type/string#unit/type/tairhash#g' redis/tests/test_helper.tcl
         cd redis
         ./runtest --stack-logging --single unit/type/tairhash
-
-        
+    - name: lcov collection
+      run: |
+        cd build
+        lcov -c -d ./ -o cover.info
+    - uses: codecov/codecov-action@v1
+      with: 
+        file: build/cover.info
+        token: ${{ secrets.CODECOV_TOKEN }}
+        verbose: true

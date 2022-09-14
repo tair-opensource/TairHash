@@ -6,11 +6,11 @@
 Grammar and complexity：
 
 
-> EXHSET key field value [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS version] [KEEPTTL]   
+> EXHSET key field value [EX time] [EXAT time] [PX time] [PXAT time] [NX/XX] [VER/ABS/GT version] [KEEPTTL]   
 > time complexity：O(1)   
 
 Command Description：  
-> Insert a field into the TairHash specified by the key. If TairHash does not exist, it will automatically create one, and if the field already exists, its value will be overwritten. When inserting, you can use EX/EXAT/PX/PXAT to set the expiration time for the field. When the field expires, it will be deleted actively (active expire) or passive (passivity expire). If the NX option is specified, the insertion will be successful only when the field does not exist. Similarly, if the XX option is specified, the insertion will be successful only when the field exists. If the VER parameter is specified, the version number carried by the VER must be consistent with the current version number of the field before it can be inserted successfully. If the field does not exist or the current version of the field is 0, no check is performed, and the insertion can always be successful. The ABS parameter is used to forcibly set the version number for the field, regardless of the current version number of the field, it can always be inserted successfully, and the version number specified by ABS cannot be 0. This command will trigger the passive elimination check of the field 
+> Insert a field into the TairHash specified by the key. If TairHash does not exist, it will automatically create one, and if the field already exists, its value will be overwritten. When inserting, you can use EX/EXAT/PX/PXAT to set the expiration time for the field. When the field expires, it will be deleted actively (active expire) or passive (passivity expire). If the NX option is specified, the insertion will be successful only when the field does not exist. Similarly, if the XX option is specified, the insertion will be successful only when the field exists. If the VER parameter is specified, the version number carried by the VER must be consistent with the current version number of the field before it can be inserted successfully. If the field does not exist or the current version of the field is 0, no check is performed, and the insertion can always be successful. The ABS parameter is used to forcibly set the version number for the field, regardless of the current version number of the field, it can always be inserted successfully, GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0. This command will trigger the passive elimination check of the field 
 
 
 parameter：
@@ -23,7 +23,8 @@ parameter：
 > PX: The relative expiration time of the specified field, in milliseconds, 0 means expire immediately   
 > PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means expire immediately   
 > NX/XX: NX means inserting is allowed only when the field to be inserted does not exist, XX means inserting is allowed only when the field exists   
-> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field   
+> VER/ABS/GT: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field, GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0.
+    
 > KEEPTTL: Retain the time to live associated with the field. KEEPTTL cannot be used together with EX/EXAT/PX/PXAT  
 
 Return：
@@ -103,7 +104,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHPEXPIREAT key field milliseconds-timestamp [VER/ABS version]   
+> EXHPEXPIREAT key field milliseconds-timestamp [VER/ABS/GT version]   
 > time complexity: (1)     
 
 
@@ -111,7 +112,7 @@ Grammar and complexity：
 Command Description：
 
 
-> Set the absolute expiration time for a field in the TaiHash specified by the key, in milliseconds. When the expiration time is up, the field will be deleted actively. If the field does not exist, return 0 directly. If VERParameter is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VERParameter is 0, no version verification is performed. ABSParameter is used to force the field to set the version number, regardless of the current version number of the field, it can always be inserted successfully. At the same time, the current version number of the field is set to the version number specified by ABS. Note that the version number cannot be 0. This command will trigger the passive elimination check of the field
+> Set the absolute expiration time for a field in the TaiHash specified by the key, in milliseconds. When the expiration time is up, the field will be deleted actively. If the field does not exist, return 0 directly. If VER parameter is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VER parameter is 0, no version verification is performed. ABS parameter is used to force the field to set the version number, regardless of the current version number of the field, it can always be inserted successfully. At the same time, the current version number of the field is set to the version number specified by ABS, GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0. This command will trigger the passive elimination check of the field
 
 
 
@@ -121,7 +122,7 @@ Parameter：
 > key: The key used to find the TairHash   
 > field: An element in TairHash   
 > milliseconds-timestamp: Timestamp in milliseconds, 0 means expire immediately   
-> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.     
+> VER/ABS/GT: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field, GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0.
 
 
 Return：
@@ -138,7 +139,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHPEXPIRE key field milliseconds [VER/ABS version]    
+> EXHPEXPIRE key field milliseconds [VER/ABS/GT version]    
 > time complexity：O(1)  
 
 
@@ -146,7 +147,7 @@ Grammar and complexity：
 Command Description：
 
 
-> Set the relative expiration time for a field in the TairHash specified by the key, in milliseconds. When the expiration time is up, the field will be deleted actively. If the field does not exist, return 0 directly. If VERParameter is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VERParameter is 0, no version verification is performed. ABSParameter is used to force the field to set the version number, regardless of the current version number of the field, it can always be inserted successfully. At the same time, the current version number of the field is set to the version number specified by ABS. Note that the version number cannot be 0. This command will trigger the passive elimination of the field   
+> Set the relative expiration time for a field in the TairHash specified by the key, in milliseconds. When the expiration time is up, the field will be deleted actively. If the field does not exist, return 0 directly. If VER parameter is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VER parameter is 0, no version verification is performed. ABS parameter is used to force the field to set the version number, regardless of the current version number of the field, it can always be inserted successfully. At the same time, the current version number of the field is set to the version number specified by ABS, GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0. This command will trigger the passive elimination of the field   
 
 
 
@@ -156,8 +157,7 @@ Parameter：
 > key: The key used to find the TairHash   
 > field: An element in TairHash      
 > milliseconds: Expiration time in milliseconds, 0 means expire immediately   
-> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.   
-
+> VER/ABS/GT: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field, GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0.
 
 
 
@@ -175,7 +175,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHEXPIREAT key field timestamp [VER/ABS version]   
+> EXHEXPIREAT key field timestamp [VER/ABS/GT version]   
 > time complexity：O(1)     
 
 
@@ -183,7 +183,7 @@ Grammar and complexity：
 Command Description：
 
 
-> Set the absolute expiration time for a field in the TairHash specified by the key, in seconds. When the expiration time expires, the field will be actively deleted. If the field does not exist, return 0 directly. If VERParameter is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VERParameter is 0, no version verification is performed. ABSParameter is used to force the field to set the version number, regardless of the current version number of the field, it can always be inserted successfully. At the same time, the current version number of the field is set to the version number specified by ABS. Note that the version number cannot be 0. This command will trigger the passive elimination of the field  
+> Set the absolute expiration time for a field in the TairHash specified by the key, in seconds. When the expiration time expires, the field will be actively deleted. If the field does not exist, return 0 directly. If VER parameter is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VER parameter is 0, no version verification is performed. ABS parameter is used to force the field to set the version number, regardless of the current version number of the field, it can always be inserted successfully. At the same time, the current version number of the field is set to the version number specified by ABS, GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0. This command will trigger the passive elimination of the field  
 
 Parameter：
 
@@ -191,7 +191,7 @@ Parameter：
 > key: The key used to find the TairHash   
 > field: An element in TairHash    
 > timestamp: Timestamp in seconds，0 means expire immediately    
-> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.
+> VER/ABS/GT: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field, GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0.
 
 
 
@@ -209,7 +209,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHEXPIRE key field seconds [VER/ABS version]     
+> EXHEXPIRE key field seconds [VER/ABS/GT version]     
 > time complexity：O(1)     
 
 
@@ -217,7 +217,7 @@ Grammar and complexity：
 Command Description：
 
 
-> Set the relative expiration time for a field in the TairHash specified by the key, in seconds. When the expiration time expires, the field will be actively deleted. If the field does not exist, return 0 directly. If VERParameter is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VERParameter is 0, no version verification is performed. ABSParameter is used to force the field to set the version number, regardless of the current version number of the field, it can always be inserted successfully. At the same time, the current version number of the field is set to the version number specified by ABS. Note that the version number cannot be 0. This command will trigger the passive elimination of the field
+> Set the relative expiration time for a field in the TairHash specified by the key, in seconds. When the expiration time expires, the field will be actively deleted. If the field does not exist, return 0 directly. If VER parameter is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VER parameter is 0, no version verification is performed. ABS parameter is used to force the field to set the version number, regardless of the current version number of the field, it can always be inserted successfully. At the same time, the current version number of the field is set to the version number specified by ABS, GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0. This command will trigger the passive elimination of the field
 
 
 
@@ -227,7 +227,7 @@ Parameter：
 > key: The key used to find the TairHash   
 > field: An element in TairHash   
 > timestamp: Timestamp in seconds, 0 means expire immediately    
-> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field.   
+> VER/ABS/GT: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field, GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0.
 
 
 
@@ -408,7 +408,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHINCRBY key field value [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [KEEPTTL]    
+> EXHINCRBY key field value [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS/GT version] [MIN minval] [MAX maxval] [KEEPTTL]    
 > time complexity：O(1)     
 
 
@@ -417,7 +417,7 @@ Command Description：
 
 
 > Add the integer value to the value of a field in TairHash specified by key. If TairHash does not exist, it will automatically create a new one. If the specified field does not exist, initialize the value of the field to 0 before adding it. At the same time, you can also use EX/EXAT/PX/PXAT to set the expiration time for the field        
-> If VER is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VERParameter is 0, no version verification is performed. ABSParameter is used to forcibly set the version number for the field, regardless of the current version number of the field, it can always be set successfully. At the same time, the current version number of the field is set to the version number specified by ABS. Note that the version number specified by ABS cannot be 0. MIN/MAX users provide a boundary for the field. Incr will be executed only when the value of the field is still on this boundary after this incr operation, otherwise an overflow error will be returned. This command will trigger the passive elimination check of the field   
+> If VER is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VER parameter is 0, no version verification is performed. ABS parameter is used to forcibly set the version number for the field, regardless of the current version number of the field, it can always be set successfully. At the same time, the current version number of the field is set to the version number specified by ABS, GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0. MIN/MAX users provide a boundary for the field. Incr will be executed only when the value of the field is still on this boundary after this incr operation, otherwise an overflow error will be returned. This command will trigger the passive elimination check of the field   
 
 
 
@@ -431,7 +431,7 @@ Parameter：
 > EXAT: Specify the absolute expiration time of the field, in seconds, 0 means expire immediately   
 > PX: The relative expiration time of the specified field, in milliseconds, 0 means expire immediately  
 > PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means expire immediately  
-> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field  
+> VER/ABS/GT: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field, GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0.
 > MAX/MIN: Specify the boundary, incr will be executed only when the value of the field is still on this boundary after this incr operation,otherwise an overflow error will be returned   
 > KEEPTTL: Retain the time to live associated with the field. KEEPTTL cannot be used together with EX/EXAT/PX/PXAT
 
@@ -450,7 +450,7 @@ Return：
 Grammar and complexity：
 
 
-> EXHINCRBYFLOAT key field value [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS version] [MIN minval] [MAX maxval] [KEEPTTL]    
+> EXHINCRBYFLOAT key field value [EX time] [EXAT time] [PX time] [PXAT time] [VER/ABS/GT version] [MIN minval] [MAX maxval] [KEEPTTL]    
 > time complexity：O(1)     
 
 
@@ -459,7 +459,7 @@ Command Description：
 
 
 > Add the floating-point value to the value of a field in TairHash specified by key. If TairHash does not exist, it will automatically create a new one. If the specified field does not exist, initialize the value of the field to 0 before adding it. At the same time, you can also use EX/EXAT/PX/PXAT to set the expiration time for the field   
-> If VER is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VERParameter is 0, no version verification is performed. ABSParameter is used to forcibly set the version number for the field, regardless of the current version number of the field, it can always be set successfully. At the same time, the current version number of the field is set to the version number specified by ABS. Note that the version number specified by ABS cannot be 0. MIN/MAX users provide a boundary for the field. Incr will be executed only when the value of the field is still on this boundary after this incr operation, otherwise an overflow error will be returned. This command will trigger the passive elimination check of the field  
+> If VER is specified, the version number carried by VER must be consistent with the current version number of the field before it can be set successfully, or if the version number carried by VER parameter is 0, no version verification is performed. ABS parameter is used to forcibly set the version number for the field, regardless of the current version number of the field, it can always be set successfully. At the same time, the current version number of the field is set to the version number specified by ABS, GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0. MIN/MAX users provide a boundary for the field. Incr will be executed only when the value of the field is still on this boundary after this incr operation, otherwise an overflow error will be returned. This command will trigger the passive elimination check of the field  
 
 
 
@@ -473,7 +473,7 @@ Parameter：
 > EXAT: Specify the absolute expiration time of the field, in seconds, 0 means expire immediately  
 > PX: The relative expiration time of the specified field, in milliseconds, 0 means expire immediately  
 > PXAT: Specify the absolute expiration time of the field, in milliseconds, 0 means expire immediately  
-> VER/ABS: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field  
+> VER/ABS/GT: VER means that the setting is allowed only when the specified version is consistent with the current version of the field. If the version specified by VER is 0, it means that no version check will be performed. ABS means that the version number is forced to be set and modified regardless of the current version of the field., GT means that the setting is only allowed when the specified version is greater than the current version of the field, the version specified by GT and ABS cannot be 0.
 > MAX/MIN: Specify the boundary, incr will be executed only when the value of the field is still on this boundary after this incr operation,otherwise an overflow error will be returned   
 > KEEPTTL: Retain the time to live associated with the field. KEEPTTL cannot be used together with EX/EXAT/PX/PXAT
 
@@ -809,8 +809,61 @@ Return：
 
 > Returns an array, each bit of the array corresponds to the key-value pair of each field in TairHash, if TairHash does not exist, it returns an empty array
 
+```sh
+127.0.0.1:6379> EXHSET k0 f1 1 ABS 2
+(integer) 1
+127.0.0.1:6379> EXHSET k0 f2 2 ABS 1
+(integer) 1
+127.0.0.1:6379> EXHGETALL k0
+1) "f2"
+2) "2"
+3) "f1"
+4) "1"
+```
+
+#### EXHGETALLWITHVER
 
 
+Grammar and complexity：
+
+
+> EXHGETALLWITHVER key
+> time complexity：O(n)
+
+
+
+Command Description：
+
+
+> Get the key-value-version tuples of all fields in TairHash specified by key
+
+
+
+Parameter：
+
+
+> key: The key used to find the TairHash
+
+
+
+Return：
+
+
+> Returns an array, each bit of the array corresponds to the key-value-version tuple of each field in TairHash, if TairHash does not exist, it returns an empty array
+
+```sh
+127.0.0.1:6379> EXHSET k0 f1 1 ABS 2
+(integer) 1
+127.0.0.1:6379> EXHSET k0 f2 2 ABS 1
+(integer) 1
+127.0.0.1:6379> EXHGETALLWITHVER k0
+1) "f2"
+2) "2"
+3) (integer) 1
+4) "f1"
+5) "1"
+6) (integer) 2
+```
 
 #### EXHSCAN
 

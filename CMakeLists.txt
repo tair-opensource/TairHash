@@ -23,6 +23,13 @@ if(SORT_MODE)
 add_definitions(-DSORT_MODE)
 endif(SORT_MODE)
 
+option(SLAB_MODE "Use a memory friendly slab-based expiration algorithm to evict expired keys more efficient!" OFF)
+
+if (SLAB_MODE)
+message(STATUS "SLAB_API defined...")
+add_definitions(-DSLAB_MODE)
+endif(SLAB_MODE)
+
 include_directories(${ROOT_DIR}/dep)
 aux_source_directory(${ROOT_DIR}/dep USRC)
 add_subdirectory(src)

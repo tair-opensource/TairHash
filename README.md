@@ -46,7 +46,7 @@
 
 ![avatar](imgs/tairhash_slab_mode_index.jpg)
 
-- Slab mode is a memory-saving, cache-friendly, high-performance expiration algorithm
+- Slab mode is a low memory usage, cache-friendly, high-performance expiration algorithm
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts globally (between slabs) and locally (within slab) order for each field inside tairhash
 - The first level of sorting uses the smallest ttl in the second level of sorting, so the main key is globally ordered according to ttl
 - Second level interval ordering, reduces memory bloat, and is friendly to memory operations, using merge nodes to ensure high memory utilization when deleting

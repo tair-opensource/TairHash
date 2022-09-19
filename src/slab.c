@@ -28,23 +28,23 @@ int slab_insertNode(Slab *slab, RedisModuleString *key, long long expire) {
     return TRUE;
 }
 
-/*   if return value  -1 is not found ,else the target postion */
+/*   if return value  -1 is not found ,else the target position */
 int slab_getNode(Slab *slab, RedisModuleString *key, long long expire) {
     if (slab == NULL) return -1;
     size_t key_len;
 
-    int target_postion = -1, i, num_keys = slab->num_keys;
+    int target_position = -1, i, num_keys = slab->num_keys;
     if (key == NULL) {  // key is null
-        return target_postion;
+        return target_position;
     }
 
     for (i = 0; i < num_keys; i++) {
         if (slab->expires[i] == expire && RedisModule_StringCompare(key, slab->keys[i]) == 0) {
-            target_postion = i;
+            target_position = i;
             break;
         }
     }
-    return target_postion;
+    return target_position;
 }
 /* slab delete index node*/
 int slab_deleteIndexNode(Slab *slab, int index) {
@@ -61,19 +61,19 @@ int slab_deleteIndexNode(Slab *slab, int index) {
 }
 
 int slab_deleteNode(Slab *slab, RedisModuleString *key, long long expire) {
-    int target_postion = slab_getNode(slab, key, expire);
-    return slab_deleteIndexNode(slab, target_postion);
+    int target_position = slab_getNode(slab, key, expire);
+    return slab_deleteIndexNode(slab, target_position);
 }
 
 int slab_updateNode(Slab *slab, RedisModuleString *cur_key, long long cur_expire, RedisModuleString *new_key, long long new_expire) {
-    int target_postion = slab_getNode(slab, cur_key, cur_expire);
+    int target_position = slab_getNode(slab, cur_key, cur_expire);
 
-    if (target_postion < 0 || target_postion >= SLABMAXN) {
+    if (target_position < 0 || target_position >= SLABMAXN) {
         return FALSE;
     }
 
-    RedisModule_FreeString(NULL, slab->keys[target_postion]);
-    slab->keys[target_postion] = new_key, slab->expires[target_postion] = new_expire;
+    RedisModule_FreeString(NULL, slab->keys[target_position]);
+    slab->keys[target_position] = new_key, slab->expires[target_position] = new_expire;
 
     return TRUE;
 }
@@ -87,7 +87,7 @@ void slab_delete(Slab *slab) {
     RedisModule_Free(slab);
 }
 
-/* get the smallest element ssubscript */
+/* get the smallest element subscript */
 int slab_minExpireTimeIndex(Slab *slab) {
     int min_subscript = 0, length = slab->num_keys, i;
     for (i = 1; i < length; i++) {

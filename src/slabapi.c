@@ -40,7 +40,7 @@ void quick_sort(Slab *slab, int low, int high) {
 
     return;
 }
-int quick_selectRelaxtopk(Slab *slab, int left, int right, int kth) {
+int quick_selectRelaxTopk(Slab *slab, int left, int right, int kth) {
     if (left > right)
         return -1;
     int mid = (right + left) / 2, i = left, j = right;
@@ -61,9 +61,9 @@ int quick_selectRelaxtopk(Slab *slab, int left, int right, int kth) {
     if (temp - RELAXATION <= j && j <= temp + RELAXATION) {
         return j;
     } else if (kth <= left_partition_len) {
-        return quick_selectRelaxtopk(slab, left, j - 1, kth);
+        return quick_selectRelaxTopk(slab, left, j - 1, kth);
     } else {
-        return quick_selectRelaxtopk(slab, j + 1, right, kth - left_partition_len - 1);
+        return quick_selectRelaxTopk(slab, j + 1, right, kth - left_partition_len - 1);
     }
 }
 void slab_ifNeedMerge(tairhash_zskiplist *zsl, tairhash_zskiplistNode *tair_hash_node) {
@@ -120,7 +120,7 @@ tairhash_zskiplistNode *slab_spilt(tairhash_zskiplist *zsl, tairhash_zskiplistNo
       slab->num_keys = SLABMAXN / 2, new_slab->num_keys = SLABMAXN - SLABMAXN / 2;
      */
 
-    int spilt_subscript = quick_selectRelaxtopk(slab, 0, SLABMAXN - 1, SLABMAXN / 4 * 3);
+    int spilt_subscript = quick_selectRelaxTopk(slab, 0, SLABMAXN - 1, SLABMAXN / 4 * 3);
     memcpy(&(new_slab->expires[0]), &(slab->expires[spilt_subscript]), (SLABMAXN - spilt_subscript) * sizeof(&(slab->expires[0])));
     memcpy(&(new_slab->keys[0]), &(slab->keys[spilt_subscript]), (SLABMAXN - spilt_subscript) * sizeof(&(slab->keys[0])));
     slab->num_keys = spilt_subscript, new_slab->num_keys = SLABMAXN - spilt_subscript;
@@ -218,14 +218,14 @@ void slab_free(tairhash_zskiplist *zsl) {
 tairhash_zskiplist *slab_create() {
     return tairhash_zslCreate();
 }
-void slab_deleteSlabEXpire(tairhash_zskiplist *zsl, tairhash_zskiplistNode *zsl_node, int *effictive_indexs, int effictive_num) {
+void slab_deleteSlabExpire(tairhash_zskiplist *zsl, tairhash_zskiplistNode *zsl_node, int *effective_indices, int effective_num) {
     if (zsl_node == NULL)
         return;
     Slab *slab = zsl_node->slab;
-    if (slab == NULL || slab->num_keys == effictive_num) {
+    if (slab == NULL || slab->num_keys == effective_num) {
         return;
     }
-    if (effictive_num == 0) {
+    if (effective_num == 0) {
         Slab *new_slab = slab;
         int delete_ans = tairhash_zslDelete(zsl, zsl_node->key_min, zsl_node->expire_min);
         assert(delete_ans == 1);
@@ -233,15 +233,15 @@ void slab_deleteSlabEXpire(tairhash_zskiplist *zsl, tairhash_zskiplistNode *zsl_
         return;
     }
     int index = 0, min_index = 0, i;
-    for (i = 0; i < effictive_num; i++) {
-        index = effictive_indexs[i];
+    for (i = 0; i < effective_num; i++) {
+        index = effective_indices[i];
         slab->expires[i] = slab->expires[index];
         slab->keys[i] = slab->keys[index];
         if (slab->expires[i] < slab->expires[min_index] || (slab->expires[i] == slab->expires[min_index] && RedisModule_StringCompare(slab->keys[i], slab->keys[min_index]) <= 0)) {
             min_index = i;
         }
     }
-    slab->num_keys = effictive_num;
+    slab->num_keys = effective_num;
     zsl_node->expire_min = slab->expires[min_index], zsl_node->key_min = slab->keys[min_index];
     slab_ifNeedMerge(zsl, zsl_node);
     return;
@@ -259,7 +259,7 @@ int slab_getSlabTimeoutExpireIndex(tairhash_zskiplistNode *node, int *ontime_ind
         return 0;
 
     __m256i target_expire_vec = _mm256_set1_epi64x(now);
-    int ontime_num = 0, timeout_num = 0, size_effictive = 0, size = slab->num_keys;
+    int ontime_num = 0, timeout_num = 0, size_effective = 0, size = slab->num_keys;
     long long *expires = slab->expires, i;
     const static int width = sizeof(__m256i) / sizeof(long long);
     const int veclen = size & ~(2 * width - 1);
@@ -349,7 +349,7 @@ int slab_getSlabTimeoutExpireIndex(tairhash_zskiplistNode *node, int *ontime_ind
     Slab *slab = node->slab;
     if (slab == NULL || slab->num_keys == 0)
         return 0;
-    int ontime_num = 0, timeout_num = 0, size_effictive = 0, size = slab->num_keys, i;
+    int ontime_num = 0, timeout_num = 0, size_effective = 0, size = slab->num_keys, i;
     long long *expires = slab->expires;
     for (i = 0; i < size; ++i) {
         ontime_indices[ontime_num] = i, timeout_indices[timeout_num] = i;

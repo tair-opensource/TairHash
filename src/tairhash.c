@@ -719,7 +719,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
                 slab_deleteTairhashRangeByRank(tair_hash_obj->expire_index, 1, delete_rank);
             }
             if (tair_hash_obj->expire_index->length > 0 && ontime_num > 0 && timeout_num > 0) {
-                slab_deleteSlabEXpire(tair_hash_obj->expire_index, tair_hash_obj->expire_index->header->level[0].forward, ontime_indices, ontime_num);
+                slab_deleteSlabExpire(tair_hash_obj->expire_index, tair_hash_obj->expire_index->header->level[0].forward, ontime_indices, ontime_num);
             }
 
             if (tair_hash_obj->expire_index->length > 0 && start_index) {

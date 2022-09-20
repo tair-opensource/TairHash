@@ -36,6 +36,7 @@
 #include "dict.h"
 #include "list.h"
 #include "redismodule.h"
+#include "slabapi.h"
 #include "skiplist.h"
 #include "util.h"
 
@@ -65,8 +66,12 @@ static RedisModuleType *TairHashType;
 #define DBS_PER_CALL 16
 #define KEYS_PER_LOOP 3
 
-#ifdef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
 static m_zskiplist *g_expire_index[DB_NUM];
+#endif
+
+#ifdef SLAB_MODE
+static int ontime_indices[SLABMAXN], timeout_indices[SLABMAXN];
 #endif
 
 static RedisModuleTimerID expire_timer_id;
@@ -107,6 +112,29 @@ inline RedisModuleString *takeAndRef(RedisModuleString *str) {
             }                                                                                      \
         }                                                                                          \
     } while (0)
+
+#elif SLAB_MODE
+#define Module_Assert(e)         \
+    do {                         \
+        RedisModule_Assert((e)); \
+    } while (0)
+#define ACTIVE_EXPIRE_INSERT(dbid, o, field, expire)                                               \
+    do {                                                                                           \
+        if (expire) {                                                                              \
+            long long before_min_score = -1, after_min_score = -1;                                 \
+            if (o->expire_index->header->level[0].forward) {                                       \
+                before_min_score = o->expire_index->header->level[0].forward->expire_min;          \
+            }                                                                                      \
+            slab_expireInsert(o->expire_index, takeAndRef(field), expire);                        \
+            after_min_score = o->expire_index->header->level[0].forward->expire_min;               \
+            if (before_min_score > 0) {                                                            \
+                m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score); \
+            } else {                                                                               \
+                m_zslInsert(g_expire_index[dbid], after_min_score, takeAndRef(o->key));            \
+            }                                                                                      \
+        }                                                                                          \
+    } while (0)
+
 #else
 #define Module_Assert(_e) ((_e) ? (void)0 : (_moduleAssert(#_e, __FILE__, __LINE__), abort()))
 void _moduleAssert(const char *estr, const char *file, int line) {
@@ -138,6 +166,21 @@ void _moduleAssert(const char *estr, const char *file, int line) {
         }                                                                                      \
     } while (0)
 
+#elif defined(SLAB_MODE)
+#define ACTIVE_EXPIRE_UPDATE(dbid, o, field, cur_expire, new_expire)                           \
+    do {                                                                                       \
+        if (cur_expire != new_expire) {                                                        \
+            long long before_min_score = -1, after_min_score = 1;                              \
+            tairhash_zskiplistNode *ln = o->expire_index->header->level[0].forward;            \
+            Module_Assert(ln != NULL);                                                         \
+            before_min_score = ln->expire_min;                                                 \
+            RedisModuleString *new_field = takeAndRef(field);                                  \
+            slab_expireUpdate(o->expire_index, field, cur_expire, new_field, new_expire);     \
+            after_min_score = o->expire_index->header->level[0].forward->expire_min;           \
+            m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score); \
+        }                                                                                      \
+    } while (0)
+
 #else
 #define ACTIVE_EXPIRE_UPDATE(dbid, o, field, cur_expire, new_expire)          \
     do {                                                                      \
@@ -164,6 +207,25 @@ void _moduleAssert(const char *estr, const char *file, int line) {
             }                                                                                     \
         }                                                                                         \
     } while (0)
+
+#elif defined(SLAB_MODE)
+#define ACTIVE_EXPIRE_DELETE(dbid, o, field, cur_expire)                                           \
+    do {                                                                                           \
+        if (cur_expire != 0) {                                                                     \
+            long long before_min_score = -1;                                                       \
+            tairhash_zskiplistNode *ln = o->expire_index->header->level[0].forward;                \
+            Module_Assert(ln != NULL);                                                             \
+            before_min_score = ln->expire_min;                                                     \
+            slab_expireDelete(o->expire_index, field, cur_expire);                                \
+            if (o->expire_index->header->level[0].forward) {                                       \
+                long long after_min_score = o->expire_index->header->level[0].forward->expire_min; \
+                m_zslUpdateScore(g_expire_index[dbid], before_min_score, field, after_min_score);  \
+            } else {                                                                               \
+                m_zslDelete(g_expire_index[dbid], before_min_score, field, NULL);                  \
+            }                                                                                      \
+        }                                                                                          \
+    } while (0)
+
 #else
 #define ACTIVE_EXPIRE_DELETE(dbid, o, field, cur_expire)           \
     do {                                                           \
@@ -203,11 +265,20 @@ static void tairHashValRelease(struct TairHashVal *o) {
     }
 }
 
+#ifdef SLAB_MODE
+typedef struct tairHashObj {
+    dict *hash;
+    tairhash_zskiplist *expire_index;
+    RedisModuleString *key;
+} tairHashObj;
+
+#else
 typedef struct tairHashObj {
     dict *hash;
     m_zskiplist *expire_index;
     RedisModuleString *key;
 } tairHashObj;
+#endif
 
 void tairhashScanCallback(void *privdata, const m_dictEntry *de) {
     list *keys = (list *)privdata;
@@ -265,7 +336,24 @@ m_dictType tairhashDictType = {
     dictModuleKeyDestructor,  /* key destructor */
     dictModuleValueDestructor /* val destructor */
 };
+#ifdef SLAB_MODE
+static void tairHashTypeReleaseObject(struct tairHashObj *o) {
+    m_dictRelease(o->hash);
+    slab_free(o->expire_index);
+    if (o->key) {
+        RedisModule_FreeString(NULL, o->key);
+    }
+    RedisModule_Free(o);
+}
 
+static struct tairHashObj *createTairHashTypeObject() {
+    tairHashObj *o = RedisModule_Calloc(1, sizeof(*o));
+    o->hash = m_dictCreate(&tairhashDictType, NULL);
+    o->expire_index = slab_create();
+    return o;
+}
+
+#else
 static void tairHashTypeReleaseObject(struct tairHashObj *o) {
     m_dictRelease(o->hash);
     m_zslFree(o->expire_index);
@@ -281,6 +369,7 @@ static struct tairHashObj *createTairHashTypeObject() {
     o->expire_index = m_zslCreate();
     return o;
 }
+#endif
 
 /* ========================== Common  func =============================*/
 void notifyFieldSpaceEvent(char *event, RedisModuleString *key, RedisModuleString *field, int dbid) {
@@ -350,6 +439,28 @@ inline static int expireTairHashObjIfNeeded(RedisModuleCtx *ctx, RedisModuleStri
     notifyFieldSpaceEvent("expired", key_dup, field_dup, dbid);
     RedisModule_FreeString(NULL, key_dup);
     RedisModule_FreeString(NULL, field_dup);
+
+#elif SLAB_MODE
+    int dbid = RedisModule_GetSelectedDb(ctx);
+    RedisModuleString *key_dup = RedisModule_CreateStringFromString(NULL, key);
+    RedisModuleString *field_dup = RedisModule_CreateStringFromString(NULL, field);
+    if (!is_timer) {
+        long long before_min_score = o->expire_index->header->level[0].forward->expire_min;
+        //  printf("head_skiplist:%p\n",o->expire_index->header->level[0].forward);
+        slab_expireDelete(o->expire_index, field_dup, when);
+        if (o->expire_index->header->level[0].forward != NULL) {
+            //    printf("delet_skiplist:%p\n",o->expire_index->header->level[0].forward);
+            long long after_min_score = o->expire_index->header->level[0].forward->expire_min;
+            m_zslUpdateScore(g_expire_index[dbid], before_min_score, key, after_min_score);
+        } else {
+            m_zslDelete(g_expire_index[dbid], before_min_score, key, NULL);
+        }
+    }
+    m_dictDelete(o->hash, field);
+    RedisModule_Replicate(ctx, "EXHDEL", "ss", key_dup, field_dup);
+    notifyFieldSpaceEvent("expired", key_dup, field_dup, dbid);
+    RedisModule_FreeString(NULL, key_dup);
+    RedisModule_FreeString(NULL, field_dup);
 #else
     if (is_timer) {
         /* See bugfix: https://github.com/redis/redis/pull/8617
@@ -383,8 +494,7 @@ int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModu
     if (!obj || (RedisModule_GetContextFlags(ctx) & REDISMODULE_CTX_FLAGS_SLAVE) || (dictSize(obj->hash) != 0)) {
         return 0;
     }
-
-#if SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
     RedisModule_DeleteKey(key);
     RedisModule_Replicate(ctx, "DEL", "s", raw_key);
     if (RedisModule_NotifyKeyspaceEvent) {
@@ -417,17 +527,14 @@ inline static int isExpire(long long when) {
     mstime_t now = RedisModule_Milliseconds();
     return now > when;
 }
-
 /* Active expire algorithm implementiation. */
 void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
     REDISMODULE_NOT_USED(data);
     RedisModule_AutoMemory(ctx);
-
     /* Slave do not exe active expire. */
     if (RedisModule_GetContextFlags(ctx) & REDISMODULE_CTX_FLAGS_SLAVE) {
         goto restart;
     }
-
     int i;
     static unsigned int current_db = 0;
     static unsigned long long loop_cnt = 0, total_expire_time = 0;
@@ -440,7 +547,13 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
     }
 
     int start_index;
-    m_zskiplistNode *ln = NULL, *ln2 = NULL;
+    m_zskiplistNode *ln = NULL;
+
+#if defined(SLAB_MODE)
+    tairhash_zskiplistNode *ln2 = NULL;
+#else
+    m_zskiplistNode *ln2 = NULL;
+#endif
 
     RedisModuleString *key, *field;
     RedisModuleKey *real_key;
@@ -456,7 +569,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
             continue;
         }
 
-#ifdef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
         if (RedisModule_DbSize(ctx) == 0) {
             current_db++;
             continue;
@@ -466,7 +579,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
         int expire_keys_per_loop = tair_hash_active_expire_keys_per_loop;
 
         list *keys = m_listCreate();
-#ifdef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
         /* 1. The current db does not have a key that needs to expire. */
         zsl_len = g_expire_index[current_db]->length;
         if (zsl_len == 0) {
@@ -548,6 +661,79 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
             continue;
         }
 
+#ifdef SLAB_MODE
+        /* SLAB_MODE:3. Delete expired field. */
+        expire_keys_per_loop = tair_hash_active_expire_keys_per_loop;
+        m_listNode *node;
+        int ontime_num = 0, timeout_num = 0, timeout_index = 0, delete_rank = 0, j;
+        while ((node = listFirst(keys)) != NULL) {
+            key = listNodeValue(node);
+            real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE | REDISMODULE_OPEN_KEY_NOTOUCH);
+            int type = RedisModule_KeyType(real_key);
+            if (type != REDISMODULE_KEYTYPE_EMPTY) {
+                Module_Assert(RedisModule_ModuleTypeGetType(real_key) == TairHashType);
+            } else {
+                m_listDelNode(keys, node);
+                continue;
+            }
+            tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
+
+            zsl_len = tair_hash_obj->expire_index->length;
+            Module_Assert(zsl_len > 0);
+
+            ln2 = tair_hash_obj->expire_index->header->level[0].forward;
+            start_index = 0, delete_rank = 0;
+            long long start_active_expire_timer = RedisModule_Milliseconds();
+            while (ln2 && expire_keys_per_loop > 0) {
+                if (ln2->level[0].forward != NULL && isExpire(ln2->level[0].forward->expire_min)) {
+                    timeout_num = ln2->slab->num_keys;
+                    ontime_num = 0;
+                } else {
+                    timeout_num = slab_getSlabTimeoutExpireIndex(ln2, ontime_indices, timeout_indices);
+                    ontime_num = ln2->slab->num_keys - timeout_num;
+                    if (timeout_num <= 0)
+                        break;
+                }
+
+                for (j = 0; j < timeout_num; j++) {
+                    if (ontime_num == 0) {
+                        timeout_index = j;
+                    } else {
+                        timeout_index = timeout_indices[j];
+                    }
+                    expireTairHashObjIfNeeded(ctx, key, tair_hash_obj, ln2->slab->keys[timeout_index], 1);
+                    stat_expired_field[current_db]++;
+                    start_index++;
+                    expire_keys_per_loop--;
+                }
+
+                if (ontime_num == 0) {
+                    delete_rank++;
+                } else {
+                    break;
+                }
+                ln2 = ln2->level[0].forward;
+            }
+
+            if (delete_rank) {
+                slab_deleteTairhashRangeByRank(tair_hash_obj->expire_index, 1, delete_rank);
+            }
+            if (tair_hash_obj->expire_index->length > 0 && ontime_num > 0 && timeout_num > 0) {
+                slab_deleteSlabExpire(tair_hash_obj->expire_index, tair_hash_obj->expire_index->header->level[0].forward, ontime_indices, ontime_num);
+            }
+
+            if (tair_hash_obj->expire_index->length > 0 && start_index) {
+                m_zslInsert(g_expire_index[current_db], tair_hash_obj->expire_index->header->level[0].forward->expire_min, takeAndRef(tair_hash_obj->key));
+            }
+            if (start_index) {
+                delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj);
+            }
+
+            m_listDelNode(keys, node);
+            start_index = 0;
+        }
+
+#else
         /* 3. Delete expired field. */
         expire_keys_per_loop = tair_hash_active_expire_keys_per_loop;
         m_listNode *node;
@@ -596,7 +782,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
 
             m_listDelNode(keys, node);
         }
-
+#endif
         m_listRelease(keys);
 
         /* 4. Next db */
@@ -622,7 +808,7 @@ restart:
     }
 }
 
-#ifdef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
 void swapDbCallback(RedisModuleCtx *ctx, RedisModuleEvent e, uint64_t sub, void *data) {
     REDISMODULE_NOT_USED(e);
     REDISMODULE_NOT_USED(sub);
@@ -720,9 +906,14 @@ static int keySpaceNotification(RedisModuleCtx *ctx, int type, const char *event
         if (tair_hash_obj->expire_index->length == 0) {
             return REDISMODULE_OK;
         }
+#ifdef SLAB_MODE
+        long long previous_index = tair_hash_obj->expire_index->header->level[0].forward->expire_min;
+#else
+        long long previous_index = tair_hash_obj->expire_index->header->level[0].forward->score;
+#endif
 
         /* Delete the previous index */
-        m_zslDelete(g_expire_index[local_from_dbid], tair_hash_obj->expire_index->header->level[0].forward->score, local_from_key, NULL);
+        m_zslDelete(g_expire_index[local_from_dbid], previous_index, local_from_key, NULL);
         if (tair_hash_obj->key) {
             /* Change key name. */
             RedisModule_FreeString(NULL, tair_hash_obj->key);
@@ -730,7 +921,7 @@ static int keySpaceNotification(RedisModuleCtx *ctx, int type, const char *event
         }
 
         /* Re-insert to dst index. */
-        m_zslInsert(g_expire_index[local_to_dbid], tair_hash_obj->expire_index->header->level[0].forward->score, takeAndRef(tair_hash_obj->key));
+        m_zslInsert(g_expire_index[local_to_dbid], previous_index, takeAndRef(tair_hash_obj->key));
 
         /* Release sources. */
         if (cmd_flag == CMD_RENAME) {
@@ -795,6 +986,10 @@ void startExpireTimer(RedisModuleCtx *ctx, void *data) {
  * command is executed, and delete up to three expired fields each time. Therefore, we allocate the expired deletion
  * tasks to each request. In theory, the faster the request, the faster the deletion.
  **/
+/* slab NO passiveExppire */
+#if defined(SLAB_MODE)
+inline static void tryPassiveExpire(RedisModuleCtx *ctx, RedisModuleString *mykey, unsigned int dbid) {}
+#else
 inline static void tryPassiveExpire(RedisModuleCtx *ctx, RedisModuleString *mykey, unsigned int dbid) {
     tairHashObj *tair_hash_obj = NULL;
 
@@ -895,6 +1090,7 @@ inline static void tryPassiveExpire(RedisModuleCtx *ctx, RedisModuleString *myke
 
     m_listRelease(keys);
 }
+#endif
 
 static int mstrcasecmp(const RedisModuleString *rs1, const char *s2) {
     size_t n1 = strlen(s2);
@@ -1131,7 +1327,7 @@ int mstring2ld(RedisModuleString *val, long double *r_val) {
 
 /* ========================= "tairhash" type commands ======================= */
 
-/* EXHSET <key> <field> <value> [EX | EXAT | PX| PXAT time] [NX|XX] [VER version | ABS version | GT version] [KEEPTTL] */
+/* EXHSET <key> <field> <value> [EX time] [EXAT time] [PX time] [PXAT time] [NX|XX] [VER version | ABS version] [KEEPTTL] */
 int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     RedisModule_AutoMemory(ctx);
 
@@ -1611,14 +1807,27 @@ int TairHashTypeHpersist_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **a
     if (!tair_hash_val->expire) {
         RedisModule_ReplyWithLongLong(ctx, 0);
     } else {
-        tair_hash_val->expire = 0;
+        // TODO:ERROR
+        // tair_hash_val->expire = 0;
 #ifdef SORT_MODE
         int dbid = RedisModule_GetSelectedDb(ctx);
         long long before_min_score, after_min_score;
         Module_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
         before_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
+#elif defined(SLAB_MODE)
+        int dbid = RedisModule_GetSelectedDb(ctx);
+        long long before_min_score, after_min_score;
+        Module_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
+        before_min_score = tair_hash_obj->expire_index->header->level[0].forward->expire_min;
+
 #endif
+
+#ifdef SLAB_MODE
+        slab_expireDelete(tair_hash_obj->expire_index, argv[2], tair_hash_val->expire);
+#else
         m_zslDelete(tair_hash_obj->expire_index, tair_hash_val->expire, argv[2], NULL);
+#endif
+        tair_hash_val->expire = 0;
 #ifdef SORT_MODE
         if (tair_hash_obj->expire_index->header->level[0].forward) {
             after_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
@@ -1626,6 +1835,15 @@ int TairHashTypeHpersist_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **a
         } else {
             m_zslDelete(g_expire_index[dbid], before_min_score, argv[1], NULL);
         }
+
+#elif defined(SLAB_MODE)
+        if (tair_hash_obj->expire_index->header->level[0].forward) {
+            after_min_score = tair_hash_obj->expire_index->header->level[0].forward->expire_min;
+            m_zslUpdateScore(g_expire_index[dbid], before_min_score, argv[1], after_min_score);
+        } else {
+            m_zslDelete(g_expire_index[dbid], before_min_score, argv[1], NULL);
+        }
+
 #endif
         RedisModule_ReplyWithLongLong(ctx, 1);
     }
@@ -2457,11 +2675,28 @@ int TairHashTypeHdel_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
                 long long before_min_score, after_min_score;
                 Module_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
                 before_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
+#elif defined(SLAB_MODE)
+                long long before_min_score, after_min_score;
+                Module_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
+                before_min_score = tair_hash_obj->expire_index->header->level[0].forward->expire_min;
 #endif
+
+#ifdef SLAB_MODE
+                slab_expireDelete(tair_hash_obj->expire_index, argv[j], tair_hash_val->expire);
+#else
                 m_zslDelete(tair_hash_obj->expire_index, tair_hash_val->expire, argv[j], NULL);
+#endif
+
 #ifdef SORT_MODE
                 if (tair_hash_obj->expire_index->header->level[0].forward) {
                     after_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
+                    m_zslUpdateScore(g_expire_index[dbid], before_min_score, argv[1], after_min_score);
+                } else {
+                    m_zslDelete(g_expire_index[dbid], before_min_score, argv[1], NULL);
+                }
+#elif defined(SLAB_MODE)
+                if (tair_hash_obj->expire_index->header->level[0].forward) {
+                    after_min_score = tair_hash_obj->expire_index->header->level[0].forward->expire_min;
                     m_zslUpdateScore(g_expire_index[dbid], before_min_score, argv[1], after_min_score);
                 } else {
                     m_zslDelete(g_expire_index[dbid], before_min_score, argv[1], NULL);
@@ -2575,11 +2810,27 @@ int TairHashTypeHdelWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString 
 #ifdef SORT_MODE
                     Module_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
                     before_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
+#elif defined(SORT_MODE)
+                    Module_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
+                    before_min_score = tair_hash_obj->expire_index->header->level[0].forward->expire_min;
 #endif
+
+#ifdef SLAB_MODE
+                    slab_expireDelete(tair_hash_obj->expire_index, argv[j], tair_hash_val->expire);
+#else
                     m_zslDelete(tair_hash_obj->expire_index, tair_hash_val->expire, argv[j], NULL);
+#endif
+
 #ifdef SORT_MODE
                     if (tair_hash_obj->expire_index->header->level[0].forward) {
                         after_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
+                        m_zslUpdateScore(g_expire_index[dbid], before_min_score, argv[1], after_min_score);
+                    } else {
+                        m_zslDelete(g_expire_index[dbid], before_min_score, argv[1], NULL);
+                    }
+#elif defined(SLAB_MODE)
+                    if (tair_hash_obj->expire_index->header->level[0].forward) {
+                        after_min_score = tair_hash_obj->expire_index->header->level[0].forward->expire_min;
                         m_zslUpdateScore(g_expire_index[dbid], before_min_score, argv[1], after_min_score);
                     } else {
                         m_zslDelete(g_expire_index[dbid], before_min_score, argv[1], NULL);
@@ -2762,7 +3013,7 @@ int TairHashTypeHkeys_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
         return RedisModule_WrongArity(ctx);
     }
 
-#ifndef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
     RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
 #else
     RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ);
@@ -2799,7 +3050,7 @@ int TairHashTypeHkeys_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     di = m_dictGetSafeIterator(tair_hash_obj->hash);
     while ((de = m_dictNext(di)) != NULL) {
         skey = (RedisModuleString *)dictGetKey(de);
-#ifdef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
         data = (TairHashVal *)dictGetVal(de);
         if (isExpire(data->expire)) {
             continue;
@@ -2814,7 +3065,7 @@ int TairHashTypeHkeys_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     }
     m_dictReleaseIterator(di);
 
-#ifndef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
     delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
 #endif
     RedisModule_ReplySetArrayLength(ctx, cn);
@@ -2828,7 +3079,7 @@ int TairHashTypeHvals_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     if (argc != 2) {
         return RedisModule_WrongArity(ctx);
     }
-#ifndef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
     RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
 #else
     RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ);
@@ -2865,7 +3116,7 @@ int TairHashTypeHvals_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     di = m_dictGetSafeIterator(tair_hash_obj->hash);
     while ((de = m_dictNext(di)) != NULL) {
         data = (TairHashVal *)dictGetVal(de);
-#ifdef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
         if (isExpire(data->expire)) {
             continue;
         }
@@ -2880,7 +3131,7 @@ int TairHashTypeHvals_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     }
     m_dictReleaseIterator(di);
 
-#ifndef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
     delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
 #endif
     RedisModule_ReplySetArrayLength(ctx, cn);
@@ -2894,7 +3145,7 @@ int tairHashGetAllGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
         return RedisModule_WrongArity(ctx);
     }
 
-#ifndef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
     RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
 #else
     RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ);
@@ -2933,7 +3184,7 @@ int tairHashGetAllGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
     while ((de = m_dictNext(di)) != NULL) {
         skey = (RedisModuleString *)dictGetKey(de);
         data = (TairHashVal *)dictGetVal(de);
-#ifdef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
         if (isExpire(data->expire)) {
             continue;
         }
@@ -2953,7 +3204,7 @@ int tairHashGetAllGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
     }
     m_dictReleaseIterator(di);
 
-#ifndef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
     delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
 #endif
     RedisModule_ReplySetArrayLength(ctx, cn);
@@ -3166,7 +3417,7 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
     uint64_t len = RedisModule_LoadUnsigned(rdb);
     o->key = RedisModule_LoadString(rdb);
 
-#ifdef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
     int dbid = RedisModule_GetDbIdFromIO(rdb);
 #else
     int dbid = 0;
@@ -3252,7 +3503,7 @@ void TairHashTypeFree(void *value) {
     }
 }
 
-#ifdef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
 
 size_t TairHashTypeMemUsage2(RedisModuleKeyOptCtx *ctx, const void *value) {
     tairHashObj *o = (tairHashObj *)value;
@@ -3299,7 +3550,11 @@ void TairHashTypeUnlink2(RedisModuleKeyOptCtx *ctx, const void *value) {
 
     if (o->expire_index->length) {
         /* UNLINK is a synchronous call, so ExpireNode can be safely deleted here. */
+#ifdef SLAB_MODE
+        m_zslDelete(g_expire_index[dbid], o->expire_index->header->level[0].forward->expire_min, o->key, NULL);
+#else
         m_zslDelete(g_expire_index[dbid], o->expire_index->header->level[0].forward->score, o->key, NULL);
+#endif
     }
 }
 
@@ -3475,7 +3730,7 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
         .aof_rewrite = TairHashTypeAofRewrite,
         .free = TairHashTypeFree,
         .digest = TairHashTypeDigest,
-#ifdef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
         .unlink2 = TairHashTypeUnlink2,
         .copy2 = TairHashTypeCopy2,
         .free_effort2 = TairHashTypeEffort2,
@@ -3491,7 +3746,7 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
         return REDISMODULE_ERR;
     }
 
-#ifdef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
     for (int i = 0; i < DB_NUM; i++) {
         g_expire_index[i] = m_zslCreate();
     }
@@ -3507,12 +3762,15 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
         RedisModule_FreeThreadSafeContext(ctx2);
     }
 
-#ifdef SORT_MODE
+#if defined(SORT_MODE) || defined(SLAB_MODE)
     RedisModule_SubscribeToServerEvent(ctx, RedisModuleEvent_SwapDB, swapDbCallback);
     RedisModule_SubscribeToServerEvent(ctx, RedisModuleEvent_FlushDB, flushDbCallback);
     RedisModule_SubscribeToKeyspaceEvents(ctx, REDISMODULE_NOTIFY_GENERIC, keySpaceNotification);
     RedisModule_RegisterInfoFunc(ctx, infoFunc);
 #endif
 
+#if defined(SLAB_MODE) && defined(__AVX2__)
+    slab_initShuffleMask();
+#endif
     return REDISMODULE_OK;
 }

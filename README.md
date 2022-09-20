@@ -42,6 +42,23 @@
 
 **Usag**e: cmake with `-DSORT_MODE=yes` option, and recompile
 
+### SLAB_MODE（slab模式）：
+
+![avatar](imgs/tairhash_slab_mode_index.jpg)
+
+- Slab mode is a low memory usage, cache-friendly, high-performance expiration algorithm
+- Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts globally (between slabs) and locally (within slab) order for each field inside tairhash
+- The first level of sorting uses the smallest ttl in the second level of sorting, so the main key is globally ordered according to ttl
+- Second level interval ordering, reduces memory bloat, and is friendly to memory operations, using merge nodes to ensure high memory utilization when deleting
+- The built-in timer will periodically scan the first-level index to find out a key that has expired,and then check the secondary index of these keys to eliminate the expired fields.and accelerate the elimination rate through prefetching and vectorization technology.This is the active expire
+- Every time you read or write a field, it will also trigger the expiration of the field itself
+- All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
+
+**Supported redis version**: redis >= 7.0
+**Advantages**: Efficient elimination, low memory consumption, and fast access bring new ideas to expiration algorithms      
+**Disadvantages**: Because the SORT_MODE implementation relies on the `unlink2` callback function (see this [PR](https://github.com/redis/redis/pull/8999))) to release the index structure synchronously, So currently only supports redis >= 7.0 and unstable branch  
+
+**Usage**: cmake with `-DSLAB_MODE=yes` option, and recompile
 ### SCAN_MODE(default):
 - Do not sort TairHash globally
 - Each TairHash will still use a sort index to sort the fields internally

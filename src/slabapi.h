@@ -15,6 +15,6 @@ int slab_expireGet(tairhash_zskiplist *zsl, RedisModuleString *key, long long ex
 void slab_free(tairhash_zskiplist *zsl);
 tairhash_zskiplist *slab_create();
 int slab_getSlabTimeoutExpireIndex(tairhash_zskiplistNode *node, int *ontime_indices, int *timeout_indices);
-void slab_deleteSlabEXpire(tairhash_zskiplist *zsl, tairhash_zskiplistNode *zsl_node, int *effictive_indexs, int effictive_num);
+void slab_deleteSlabExpire(tairhash_zskiplist *zsl, tairhash_zskiplistNode *zsl_node, int *effective_indices, int effective_num);
 unsigned int slab_deleteTairhashRangeByRank(tairhash_zskiplist *zsl, unsigned int start, unsigned int end);
 #endif

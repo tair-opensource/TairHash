@@ -34,6 +34,7 @@ tairhash_zskiplist *tairhash_zslCreate(void) {
 void tairhash_zslFreeNode(tairhash_zskiplistNode *node) {
     RedisModule_Free(node);
 }
+
 /* Free a whole skiplist. */
 void tairhash_zslFree(tairhash_zskiplist *zsl) {
     if (zsl == NULL)
@@ -51,6 +52,7 @@ void tairhash_zslFree(tairhash_zskiplist *zsl) {
     }
     RedisModule_Free(zsl);
 }
+
 int tairhash_zslRandomLevel(void) {
     int level = 1;
     while ((random() & 0xFFFF) < (TAIRHASH_ZSKIPLIST_P * 0xFFFF))
@@ -69,6 +71,7 @@ tairhash_zskiplistNode *tairhash_zslGetNode(tairhash_zskiplist *zsl, RedisModule
     }
     return x;
 }
+
 tairhash_zskiplistNode *tairhash_zslInsertNode(tairhash_zskiplist *zsl, Slab *slab, RedisModuleString *key_min, long long expire_min) {
     tairhash_zskiplistNode *update[TAIRHASH_ZSKIPLIST_MAXLEVEL], *x;
     uint32_t rank[TAIRHASH_ZSKIPLIST_MAXLEVEL];
@@ -116,6 +119,7 @@ tairhash_zskiplistNode *tairhash_zslInsertNode(tairhash_zskiplist *zsl, Slab *sl
     zsl->length++;
     return x;
 }
+
 void tairhash_zslDeleteNode(tairhash_zskiplist *zsl, tairhash_zskiplistNode *x, tairhash_zskiplistNode **update) {
     int i;
     for (i = 0; i < zsl->level; i++) {
@@ -135,6 +139,7 @@ void tairhash_zslDeleteNode(tairhash_zskiplist *zsl, tairhash_zskiplistNode *x, 
         zsl->level--;
     zsl->length--;
 }
+
 int tairhash_zslDelete(tairhash_zskiplist *zsl, RedisModuleString *key, long long expire) {
     tairhash_zskiplistNode *update[TAIRHASH_ZSKIPLIST_MAXLEVEL], *x;
     int i;
@@ -154,6 +159,7 @@ int tairhash_zslDelete(tairhash_zskiplist *zsl, RedisModuleString *key, long lon
     }
     return 0; /* not found */
 }
+
 tairhash_zskiplistNode *tairhash_zslUpdateNode(tairhash_zskiplist *zsl, RedisModuleString *cur_key_min, long long cur_expire_min, RedisModuleString *new_key_min, long long new_expire_min) {
     tairhash_zskiplistNode *update[TAIRHASH_ZSKIPLIST_MAXLEVEL], *x, *newnode;
     int i;

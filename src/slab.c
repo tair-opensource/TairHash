@@ -18,6 +18,7 @@ Slab *slab_createNode(void) {
 
     return slab;
 }
+
 /*insert to the slab tail */
 int slab_insertNode(Slab *slab, RedisModuleString *key, long long expire) {
     if (slab->num_keys >= SLABMAXN) {
@@ -46,6 +47,7 @@ int slab_getNode(Slab *slab, RedisModuleString *key, long long expire) {
     }
     return target_position;
 }
+
 /* slab delete index node*/
 int slab_deleteIndexNode(Slab *slab, int index) {
     if (index < 0 || slab->num_keys <= 0 || index >= slab->num_keys) {
@@ -77,6 +79,7 @@ int slab_updateNode(Slab *slab, RedisModuleString *cur_key, long long cur_expire
 
     return TRUE;
 }
+
 /* free slab */
 void slab_delete(Slab *slab) {
     if (slab == NULL) return;
@@ -97,6 +100,7 @@ int slab_minExpireTimeIndex(Slab *slab) {
     }
     return min_subscript;
 }
+
 int slab_getExpiredKeyIndices(Slab *slab, long long target_ttl, int *out_indices) {
     if (slab == NULL || slab->num_keys == 0)
         return 0;
@@ -108,6 +112,7 @@ int slab_getExpiredKeyIndices(Slab *slab, long long target_ttl, int *out_indices
     }
     return size_out;
 }
+
 inline void slab_swap(Slab *slab, int left, int right) {
     long long temp_expire = slab->expires[left];
     RedisModuleString *temp_key = slab->keys[left];

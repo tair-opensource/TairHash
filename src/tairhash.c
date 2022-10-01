@@ -36,8 +36,8 @@
 #include "dict.h"
 #include "list.h"
 #include "redismodule.h"
-#include "slabapi.h"
 #include "skiplist.h"
+#include "slabapi.h"
 #include "util.h"
 
 static RedisModuleType *TairHashType;
@@ -125,7 +125,7 @@ inline RedisModuleString *takeAndRef(RedisModuleString *str) {
             if (o->expire_index->header->level[0].forward) {                                       \
                 before_min_score = o->expire_index->header->level[0].forward->expire_min;          \
             }                                                                                      \
-            slab_expireInsert(o->expire_index, takeAndRef(field), expire);                        \
+            slab_expireInsert(o->expire_index, takeAndRef(field), expire);                         \
             after_min_score = o->expire_index->header->level[0].forward->expire_min;               \
             if (before_min_score > 0) {                                                            \
                 m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score); \
@@ -175,7 +175,7 @@ void _moduleAssert(const char *estr, const char *file, int line) {
             Module_Assert(ln != NULL);                                                         \
             before_min_score = ln->expire_min;                                                 \
             RedisModuleString *new_field = takeAndRef(field);                                  \
-            slab_expireUpdate(o->expire_index, field, cur_expire, new_field, new_expire);     \
+            slab_expireUpdate(o->expire_index, field, cur_expire, new_field, new_expire);      \
             after_min_score = o->expire_index->header->level[0].forward->expire_min;           \
             m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score); \
         }                                                                                      \
@@ -216,7 +216,7 @@ void _moduleAssert(const char *estr, const char *file, int line) {
             tairhash_zskiplistNode *ln = o->expire_index->header->level[0].forward;                \
             Module_Assert(ln != NULL);                                                             \
             before_min_score = ln->expire_min;                                                     \
-            slab_expireDelete(o->expire_index, field, cur_expire);                                \
+            slab_expireDelete(o->expire_index, field, cur_expire);                                 \
             if (o->expire_index->header->level[0].forward) {                                       \
                 long long after_min_score = o->expire_index->header->level[0].forward->expire_min; \
                 m_zslUpdateScore(g_expire_index[dbid], before_min_score, field, after_min_score);  \
@@ -1142,7 +1142,7 @@ int tairHashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
                 ex_flags |= TAIR_HASH_SET_WITH_VER;
                 version_p = next;
                 j++;
-            } else if (!mstrcasecmp(argv[4], "abs") && !(ex_flags & TAIR_HASH_SET_WITH_VER)  && !(ex_flags & TAIR_HASH_SET_WITH_GT_VER) && next) {
+            } else if (!mstrcasecmp(argv[4], "abs") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && !(ex_flags & TAIR_HASH_SET_WITH_GT_VER) && next) {
                 ex_flags |= TAIR_HASH_SET_WITH_ABS_VER;
                 version_p = next;
                 j++;
@@ -1233,7 +1233,7 @@ int tairHashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
         if (ex_flags & (TAIR_HASH_SET_WITH_ABS_VER | TAIR_HASH_SET_WITH_GT_VER)) {
             tair_hash_val->version = version;
         } else {
-             tair_hash_val->version += 1;
+            tair_hash_val->version += 1;
         }
 
         size_t vlen = 0, VSIZE_MAX = 5;
@@ -2007,7 +2007,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
             ex_flags |= TAIR_HASH_SET_ABS_EXPIRE;
             expire_p = next;
             j++;
-        } else if (!mstrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER)  && !(ex_flags & TAIR_HASH_SET_WITH_GT_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && !(ex_flags & TAIR_HASH_SET_WITH_GT_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_VER;
             version_p = next;
             j++;
@@ -2015,7 +2015,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
             ex_flags |= TAIR_HASH_SET_WITH_ABS_VER;
             version_p = next;
             j++;
-         } else if (!mstrcasecmp(argv[j], "gt") && !(ex_flags & TAIR_HASH_SET_WITH_VER)  && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "gt") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_GT_VER;
             version_p = next;
             j++;
@@ -2111,7 +2111,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
             if (version != 0 && version != tair_hash_val->version) {
                 RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION);
                 return REDISMODULE_ERR;
-            } 
+            }
         } else if (ex_flags & TAIR_HASH_SET_WITH_GT_VER) {
             if (version <= tair_hash_val->version) {
                 RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION);
@@ -2237,7 +2237,7 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
             ex_flags |= TAIR_HASH_SET_ABS_EXPIRE;
             expire_p = next;
             j++;
-        } else if (!mstrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER)  && !(ex_flags & TAIR_HASH_SET_WITH_GT_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && !(ex_flags & TAIR_HASH_SET_WITH_GT_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_VER;
             version_p = next;
             j++;
@@ -2245,7 +2245,7 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
             ex_flags |= TAIR_HASH_SET_WITH_ABS_VER;
             version_p = next;
             j++;
-        } else if (!mstrcasecmp(argv[j], "gt") && !(ex_flags & TAIR_HASH_SET_WITH_VER)  && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
+        } else if (!mstrcasecmp(argv[j], "gt") && !(ex_flags & TAIR_HASH_SET_WITH_VER) && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && next) {
             ex_flags |= TAIR_HASH_SET_WITH_GT_VER;
             version_p = next;
             j++;

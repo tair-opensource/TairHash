@@ -30,6 +30,7 @@ int partition(Slab *slab, int low, int high) {
     slab->expires[low] = expire, slab->keys[low] = key;
     return low;
 }
+
 void quick_sort(Slab *slab, int low, int high) {
     int pos;
     if (low < high) {
@@ -40,6 +41,7 @@ void quick_sort(Slab *slab, int low, int high) {
 
     return;
 }
+
 int quick_selectRelaxtopk(Slab *slab, int left, int right, int kth) {
     if (left > right)
         return -1;
@@ -66,7 +68,8 @@ int quick_selectRelaxtopk(Slab *slab, int left, int right, int kth) {
         return quick_selectRelaxtopk(slab, j + 1, right, kth - left_partition_len - 1);
     }
 }
-void slab_ifNeedMerge(tairhash_zskiplist *zsl, tairhash_zskiplistNode *tair_hash_node) {
+
+void slab_mergeIfNeed(tairhash_zskiplist *zsl, tairhash_zskiplistNode *tair_hash_node) {
     if (tair_hash_node == NULL || tair_hash_node->slab == NULL || tair_hash_node->slab->num_keys == 0
         || tair_hash_node->slab->num_keys >= SLABMAXN) {
         return;
@@ -102,6 +105,7 @@ void slab_ifNeedMerge(tairhash_zskiplist *zsl, tairhash_zskiplistNode *tair_hash
     }
     return;
 }
+
 tairhash_zskiplistNode *slab_spilt(tairhash_zskiplist *zsl, tairhash_zskiplistNode *tair_hash_node) {
     if (tair_hash_node == NULL || tair_hash_node->slab == NULL || tair_hash_node->slab->num_keys != SLABMAXN)
         return NULL;
@@ -167,6 +171,7 @@ void slab_expireInsert(tairhash_zskiplist *zsl, RedisModuleString *key, long lon
     }
     return;
 }
+
 void slab_expireDelete(tairhash_zskiplist *zsl, RedisModuleString *key, long long expire) {
     tairhash_zskiplistNode *find_node = tairhash_zslGetNode(zsl, key, expire);
     assert(find_node != NULL);
@@ -192,9 +197,10 @@ void slab_expireDelete(tairhash_zskiplist *zsl, RedisModuleString *key, long lon
         int smallest_subscript = slab_minExpireTimeIndex(find_slab);
         find_node->expire_min = find_slab->expires[smallest_subscript], find_node->key_min = find_slab->keys[smallest_subscript];
     }
-    slab_ifNeedMerge(zsl, find_node);  // if need merge
+    slab_mergeIfNeed(zsl, find_node);  // if need merge
     return;
 }
+
 void slab_expireUpdate(tairhash_zskiplist *zsl, RedisModuleString *cur_key, long long cur_expire, RedisModuleString *new_key, long long new_expire) {
     slab_expireDelete(zsl, cur_key, cur_expire);
     slab_expireInsert(zsl, new_key, new_expire);
@@ -212,12 +218,15 @@ int slab_expireGet(tairhash_zskiplist *zsl, RedisModuleString *key, long long ex
     }
     return has_find;
 }
+
 void slab_free(tairhash_zskiplist *zsl) {
     tairhash_zslFree(zsl);
 }
+
 tairhash_zskiplist *slab_create() {
     return tairhash_zslCreate();
 }
+
 void slab_deleteSlabExpire(tairhash_zskiplist *zsl, tairhash_zskiplistNode *zsl_node, int *effective_indexs, int effective_num) {
     if (zsl_node == NULL)
         return;
@@ -243,9 +252,10 @@ void slab_deleteSlabExpire(tairhash_zskiplist *zsl, tairhash_zskiplistNode *zsl_
     }
     slab->num_keys = effective_num;
     zsl_node->expire_min = slab->expires[min_index], zsl_node->key_min = slab->keys[min_index];
-    slab_ifNeedMerge(zsl, zsl_node);
+    slab_mergeIfNeed(zsl, zsl_node);
     return;
 }
+
 unsigned int slab_deleteTairhashRangeByRank(tairhash_zskiplist *zsl, unsigned int start, unsigned int end) {
     return tairhash_zslDeleteRangeByRank(zsl, start, end);
 }
@@ -297,6 +307,7 @@ int slab_getSlabTimeoutExpireIndex(tairhash_zskiplistNode *node, int *ontime_ind
     }
     return timeout_num;
 }
+
 void slab_initShuffleMask() {
     __m256i shuffle_timeout_mask_array[16] = {
         (__m256i)(__v4di){0, 1, 2, 3},
@@ -343,6 +354,7 @@ void slab_initShuffleMask() {
 }
 
 #else
+
 int slab_getSlabTimeoutExpireIndex(tairhash_zskiplistNode *node, int *ontime_indices, int *timeout_indices) {
     long long now = RedisModule_Milliseconds();
     if (node == NULL || node->expire_min > now) return 0;

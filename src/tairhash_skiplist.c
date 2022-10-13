@@ -14,14 +14,13 @@ tairhash_zskiplistNode *tairhash_zslCreateNode(int level, Slab *slab, long long 
 
 /* Create a new tairhashskiplist. */
 tairhash_zskiplist *tairhash_zslCreate(void) {
-    int j;
     tairhash_zskiplist *zsl;
 
     zsl = (tairhash_zskiplist *)RedisModule_Alloc(sizeof(*zsl));
     zsl->length = 0;
     zsl->level = 1;
     zsl->header = tairhash_zslCreateNode(TAIRHASH_ZSKIPLIST_MAXLEVEL, NULL, 0, NULL);
-    for (j = 0; j < TAIRHASH_ZSKIPLIST_MAXLEVEL; j++) {
+    for (int j = 0; j < TAIRHASH_ZSKIPLIST_MAXLEVEL; j++) {
         zsl->header->level[j].forward = NULL;
         zsl->header->level[j].span = 0;
     }
@@ -62,9 +61,9 @@ int tairhash_zslRandomLevel(void) {
 
 tairhash_zskiplistNode *tairhash_zslGetNode(tairhash_zskiplist *zsl, RedisModuleString *key_min, long long expire_min) {
     tairhash_zskiplistNode *x;
-    int i;
+
     x = zsl->header;
-    for (i = zsl->level - 1; i >= 0; i--) {
+    for (int i = zsl->level - 1; i >= 0; i--) {
         while (x->level[i].forward && (x->level[i].forward->expire_min < expire_min || (x->level[i].forward->expire_min == expire_min && RedisModule_StringCompare(x->level[i].forward->key_min, key_min) <= 0))) {
             x = x->level[i].forward;
         }
@@ -121,8 +120,7 @@ tairhash_zskiplistNode *tairhash_zslInsertNode(tairhash_zskiplist *zsl, Slab *sl
 }
 
 void tairhash_zslDeleteNode(tairhash_zskiplist *zsl, tairhash_zskiplistNode *x, tairhash_zskiplistNode **update) {
-    int i;
-    for (i = 0; i < zsl->level; i++) {
+    for (int i = 0; i < zsl->level; i++) {
         if (update[i]->level[i].forward == x) {
             update[i]->level[i].span += x->level[i].span - 1;
             update[i]->level[i].forward = x->level[i].forward;
@@ -142,9 +140,9 @@ void tairhash_zslDeleteNode(tairhash_zskiplist *zsl, tairhash_zskiplistNode *x, 
 
 int tairhash_zslDelete(tairhash_zskiplist *zsl, RedisModuleString *key, long long expire) {
     tairhash_zskiplistNode *update[TAIRHASH_ZSKIPLIST_MAXLEVEL], *x;
-    int i;
+
     x = zsl->header;
-    for (i = zsl->level - 1; i >= 0; i--) {
+    for (int i = zsl->level - 1; i >= 0; i--) {
         while (x->level[i].forward && (x->level[i].forward->expire_min < expire || (x->level[i].forward->expire_min == expire && RedisModule_StringCompare(x->level[i].forward->key_min, key) < 0))) {
             x = x->level[i].forward;
         }
@@ -162,11 +160,10 @@ int tairhash_zslDelete(tairhash_zskiplist *zsl, RedisModuleString *key, long lon
 
 tairhash_zskiplistNode *tairhash_zslUpdateNode(tairhash_zskiplist *zsl, RedisModuleString *cur_key_min, long long cur_expire_min, RedisModuleString *new_key_min, long long new_expire_min) {
     tairhash_zskiplistNode *update[TAIRHASH_ZSKIPLIST_MAXLEVEL], *x, *newnode;
-    int i;
     /* We need to seek to element to update to start: this is useful anyway,
      * we'll have to update or remove it. */
     x = zsl->header;
-    for (i = zsl->level - 1; i >= 0; i--) {
+    for (int i = zsl->level - 1; i >= 0; i--) {
         while (x->level[i].forward && (x->level[i].forward->expire_min < cur_expire_min || (x->level[i].forward->expire_min == cur_expire_min && RedisModule_StringCompare(x->level[i].forward->key_min, cur_key_min) < 0))) {
             x = x->level[i].forward;
         }
@@ -202,10 +199,10 @@ tairhash_zskiplistNode *tairhash_zslUpdateNode(tairhash_zskiplist *zsl, RedisMod
 unsigned int tairhash_zslDeleteRangeByRank(tairhash_zskiplist *zsl, unsigned int start, unsigned int end) {
     tairhash_zskiplistNode *update[TAIRHASH_ZSKIPLIST_MAXLEVEL], *x;
     unsigned long traversed = 0, removed = 0;
-    int i;
+
 
     x = zsl->header;
-    for (i = zsl->level - 1; i >= 0; i--) {
+    for (int i = zsl->level - 1; i >= 0; i--) {
         while (x->level[i].forward && (traversed + x->level[i].span) < start) {
             traversed += x->level[i].span;
             x = x->level[i].forward;

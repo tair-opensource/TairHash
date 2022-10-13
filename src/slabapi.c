@@ -94,8 +94,8 @@ void slab_mergeIfNeed(tairhash_zskiplist *zsl, tairhash_zskiplistNode *tair_hash
         Slab *pre_slab = pre_tair_hash_node->slab;
         int merge_sum = pre_slab->num_keys + cur_slab->num_keys;
         if (merge_sum <= SLABMERGENUM && pre_slab->num_keys > 0) {
-            memcpy(&(cur_slab->expires[cur_slab->num_keys]), &(pre_slab->expires[0]), pre_slab->num_keys * sizeof(&(cur_slab->expires[0])));
-            memcpy(&(cur_slab->keys[cur_slab->num_keys]), &(pre_slab->keys[0]), pre_slab->num_keys * sizeof(&(cur_slab->keys[0])));
+            memcpy(&(cur_slab->expires[cur_slab->num_keys]), &(pre_slab->expires[0]), pre_slab->num_keys * sizeof(cur_slab->expires[0]));
+            memcpy(&(cur_slab->keys[cur_slab->num_keys]), &(pre_slab->keys[0]), pre_slab->num_keys * sizeof(cur_slab->keys[0]));
             cur_slab->num_keys = merge_sum;
             tair_hash_node->expire_min = pre_tair_hash_node->expire_min, tair_hash_node->key_min = pre_tair_hash_node->key_min;
             RedisModule_Free(pre_slab);
@@ -106,7 +106,7 @@ void slab_mergeIfNeed(tairhash_zskiplist *zsl, tairhash_zskiplistNode *tair_hash
     return;
 }
 
-tairhash_zskiplistNode *slab_spilt(tairhash_zskiplist *zsl, tairhash_zskiplistNode *tair_hash_node) {
+tairhash_zskiplistNode *slab_split(tairhash_zskiplist *zsl, tairhash_zskiplistNode *tair_hash_node) {
     if (tair_hash_node == NULL || tair_hash_node->slab == NULL || tair_hash_node->slab->num_keys != SLABMAXN)
         return NULL;
 
@@ -124,10 +124,10 @@ tairhash_zskiplistNode *slab_spilt(tairhash_zskiplist *zsl, tairhash_zskiplistNo
       slab->num_keys = SLABMAXN / 2, new_slab->num_keys = SLABMAXN - SLABMAXN / 2;
      */
 
-    int spilt_subscript = quick_selectRelaxtopk(slab, 0, SLABMAXN - 1, SLABMAXN / 4 * 3);
-    memcpy(&(new_slab->expires[0]), &(slab->expires[spilt_subscript]), (SLABMAXN - spilt_subscript) * sizeof(&(slab->expires[0])));
-    memcpy(&(new_slab->keys[0]), &(slab->keys[spilt_subscript]), (SLABMAXN - spilt_subscript) * sizeof(&(slab->keys[0])));
-    slab->num_keys = spilt_subscript, new_slab->num_keys = SLABMAXN - spilt_subscript;
+    int split_subscript = quick_selectRelaxtopk(slab, 0, SLABMAXN - 1, SLABMAXN / 4 * 3);
+    memcpy(&(new_slab->expires[0]), &(slab->expires[split_subscript]), (SLABMAXN - split_subscript) * sizeof(&(slab->expires[0])));
+    memcpy(&(new_slab->keys[0]), &(slab->keys[split_subscript]), (SLABMAXN - split_subscript) * sizeof(&(slab->keys[0])));
+    slab->num_keys = split_subscript, new_slab->num_keys = SLABMAXN - split_subscript;
 
     long long new_expire_min = new_slab->expires[0];
     RedisModuleString *new_key_min = new_slab->keys[0];
@@ -142,9 +142,9 @@ void slab_expireInsert(tairhash_zskiplist *zsl, RedisModuleString *key, long lon
         find_node = zsl->header->level[0].forward;  // try to insert first skiplistNode
     }
 
-    if (find_node != NULL && find_node->slab != NULL && find_node->slab->num_keys == SLABMAXN)  // slab full, running slab spilt
+    if (find_node != NULL && find_node->slab != NULL && find_node->slab->num_keys == SLABMAXN)  // slab full, running slab split
     {
-        tairhash_zskiplistNode *new_tair_hash_node = slab_spilt(zsl, find_node);
+        tairhash_zskiplistNode *new_tair_hash_node = slab_split(zsl, find_node);
         if (new_tair_hash_node->expire_min < expire || (new_tair_hash_node->expire_min == expire  // insert  new slab
                                                         && RedisModule_StringCompare(new_tair_hash_node->key_min, key) < 0)) {
             find_node = new_tair_hash_node;

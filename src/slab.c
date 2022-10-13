@@ -9,8 +9,7 @@
 /* create slab */
 Slab *slab_createNode(void) {
     Slab *slab = (Slab *)RedisModule_Alloc(sizeof(Slab));
-    int i;
-    for (i = 0; i < SLABMAXN; i++) {
+    for (int i = 0; i < SLABMAXN; i++) {
         slab->keys[i] = NULL;
         slab->expires[i] = 0;
     }
@@ -34,12 +33,12 @@ int slab_getNode(Slab *slab, RedisModuleString *key, long long expire) {
     if (slab == NULL) return -1;
     size_t key_len;
 
-    int target_position = -1, i, num_keys = slab->num_keys;
+    int target_position = -1, num_keys = slab->num_keys;
     if (key == NULL) {  // key is null
         return target_position;
     }
 
-    for (i = 0; i < num_keys; i++) {
+    for (int i = 0; i < num_keys; i++) {
         if (slab->expires[i] == expire && RedisModule_StringCompare(key, slab->keys[i]) == 0) {
             target_position = i;
             break;
@@ -83,8 +82,7 @@ int slab_updateNode(Slab *slab, RedisModuleString *cur_key, long long cur_expire
 /* free slab */
 void slab_delete(Slab *slab) {
     if (slab == NULL) return;
-    int i;
-    for (i = 0; i < slab->num_keys; i++) {
+    for (int i = 0; i < slab->num_keys; i++) {
         RedisModule_FreeString(NULL, slab->keys[i]);
     }
     RedisModule_Free(slab);
@@ -92,8 +90,8 @@ void slab_delete(Slab *slab) {
 
 /* get the smallest element ssubscript */
 int slab_minExpireTimeIndex(Slab *slab) {
-    int min_subscript = 0, length = slab->num_keys, i;
-    for (i = 1; i < length; i++) {
+    int min_subscript = 0, length = slab->num_keys;
+    for (int i = 1; i < length; i++) {
         if (slab->expires[min_subscript] > slab->expires[i] || (slab->expires[min_subscript] == slab->expires[i] && RedisModule_StringCompare(slab->keys[min_subscript], slab->keys[i]) > 0)) {
             min_subscript = i;
         }
@@ -105,8 +103,8 @@ int slab_getExpiredKeyIndices(Slab *slab, long long target_ttl, int *out_indices
     if (slab == NULL || slab->num_keys == 0)
         return 0;
 
-    int size_out = 0, size = slab->num_keys, i;
-    for (i = 0; i < size; i++) {
+    int size_out = 0, size = slab->num_keys;
+    for (int i = 0; i < size; i++) {
         out_indices[size_out] = i;
         size_out += (slab->expires[i] <= target_ttl);
     }

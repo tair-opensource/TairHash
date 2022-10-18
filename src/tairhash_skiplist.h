@@ -18,6 +18,7 @@ typedef struct tairhash_zskiplistNode {
         unsigned long span;
     } level[];
 } tairhash_zskiplistNode;
+
 typedef struct tairhash_zskiplist {
     struct tairhash_zskiplistNode *header, *tail;
     unsigned long length;

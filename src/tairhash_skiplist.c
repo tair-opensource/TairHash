@@ -2,7 +2,7 @@
 
 #include <assert.h>
 #include <stdio.h>
-/* Create a tairhashskiplist node with tehn specified number of levelss.*/
+/* Create a tairhashskiplist node with specified number of levelss.*/
 tairhash_zskiplistNode *tairhash_zslCreateNode(int level, Slab *slab, long long expire, RedisModuleString *key) {
     tairhash_zskiplistNode *zn = (tairhash_zskiplistNode *)RedisModule_Alloc(sizeof(*zn) + level * sizeof(struct tairhash_zskiplistLevel));
     zn->slab = slab;

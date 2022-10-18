@@ -8,6 +8,7 @@
 #ifdef __AVX2__
 void slab_initShuffleMask();
 #endif
+
 void slab_expireInsert(tairhash_zskiplist *zsl, RedisModuleString *key, long long expire);
 void slab_expireDelete(tairhash_zskiplist *zsl, RedisModuleString *key, long long expire);
 void slab_expireUpdate(tairhash_zskiplist *zsl, RedisModuleString *cur_key, long long cur_expire, RedisModuleString *new_key, long long new_expire);

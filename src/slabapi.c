@@ -271,7 +271,7 @@ int slab_getSlabTimeoutExpireIndex(tairhash_zskiplistNode *node, int *ontime_ind
     __m256i target_expire_vec = _mm256_set1_epi64x(now);
     int ontime_num = 0, timeout_num = 0, size_effective = 0, size = slab->num_keys;
     long long *expires = slab->expires, i;
-    const static int width = sizeof(__m256i) / sizeof(long long);
+    static const int width = sizeof(__m256i) / sizeof(long long);
     const int veclen = size & ~(2 * width - 1);
     int step_size = (width << 1);
     for (i = 0; i < veclen; i += step_size) {

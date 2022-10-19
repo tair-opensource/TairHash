@@ -2810,7 +2810,7 @@ int TairHashTypeHdelWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString 
 #ifdef SORT_MODE
                     Module_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
                     before_min_score = tair_hash_obj->expire_index->header->level[0].forward->score;
-#elif defined(SORT_MODE)
+#elif defined(SLAB_MODE)
                     Module_Assert(tair_hash_obj->expire_index->header->level[0].forward != NULL);
                     before_min_score = tair_hash_obj->expire_index->header->level[0].forward->expire_min;
 #endif

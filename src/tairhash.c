@@ -249,7 +249,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
             continue;
         }
 
-        if (RedisModule_DbSize(ctx) == 0) {
+        if (RedisModule_DbSize && RedisModule_DbSize(ctx) == 0) {
             current_db++;
             continue;
         }

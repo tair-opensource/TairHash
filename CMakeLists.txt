@@ -25,6 +25,7 @@ endif(SORT_MODE)
 
 option(SLAB_MODE "Use a memory friendly slab-based expiration algorithm to evict expired keys more efficient!" OFF)
 
+if (SLAB_MODE)
 
 include(CheckCSourceRuns)
 
@@ -47,7 +48,6 @@ int main()
   return 0;
 }" HAVE_AVX2_EXTENSIONS)
 
-if (SLAB_MODE)
 message(STATUS "SLAB_API defined...")
 
 if (HAVE_AVX2_EXTENSIONS)
@@ -58,5 +58,6 @@ add_definitions(-DSLAB_MODE)
 endif(SLAB_MODE)
 
 include_directories(${ROOT_DIR}/dep)
+include_directories(${ROOT_DIR}/src)
 aux_source_directory(${ROOT_DIR}/dep USRC)
 add_subdirectory(src)

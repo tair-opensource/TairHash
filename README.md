@@ -18,7 +18,7 @@
 ### The main features：
 
 - Field supports setting expiration and version
-- Support efficient active expiration (SORT mode and SCAN mode) and passivity expiration for field
+- Support efficient active expiration (SCAN mode, SORT mode and SLAB mode) and passivity expiration for field
 - The cmd is similar to the redis hash
 - Very low memory consumption, no memory copy in the index
 - Support field expired event notification (based on pubsub)
@@ -26,6 +26,21 @@
 ## Data structure
 ![avatar](imgs/tairhash_index2.png)  
 ## Active expiration
+### SCAN_MODE(default):
+- Do not sort TairHash globally (Smaller memory overhead)
+- Each TairHash will still use a sort index to sort the fields internally (For expiration efficiency)
+- The built-in timer will periodically use the SCAN command to find the TairHash that contains the expired field, and then check the sort index inside the TairHash to eliminate the field
+- Every time you read or write a field, it will also trigger the expiration of the field itself
+- All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
+
+**Supported redis version**: redis >= 5.0
+
+**Advantages**: can run in the low version of redis (redis >= 5.0)  
+
+**Disadvantages**: low efficiency of expire elimination (compared with SORT mode and SLAB mode)  
+
+**Usage**: cmake with `-DSORT_MODE=no` option, and recompile
+
 ### SORT_MODE：
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
 - The first-level uses the smallest ttl in the second-level for sorting, so the main key is globally ordered
@@ -46,33 +61,15 @@
 
 ![avatar](imgs/tairhash_slab_mode_index.jpg)
 
-- Slab mode is a low memory usage, cache-friendly, high-performance expiration algorithm
-- Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts globally (between slabs) and locally (within slab) order for each field inside tairhash
-- The first level of sorting uses the smallest ttl in the second level of sorting, so the main key is globally ordered according to ttl
-- Second level interval ordering, reduces memory bloat, and is friendly to memory operations, using merge nodes to ensure high memory utilization when deleting
-- The built-in timer will periodically scan the first-level index to find out a key that has expired,and then check the secondary index of these keys to eliminate the expired fields.and accelerate the elimination rate through prefetching and vectorization technology.This is the active expire
-- Every time you read or write a field, it will also trigger the expiration of the field itself
-- All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
+- Slab mode is a low memory usage (compared with SORT mode), cache-friendly, high-performance expiration algorithm
+- Like SORT mode, keys are globally sorted to ensure that keys that need to be expired can be found faster. Unlike SORT mode, SLAB does not sort the fields inside the key, which saves memory overhead. 
+- The SLAB expiration algorithm uses SIMD instructions (when supported by the hardware) to speed up the search for expired fields
 
 **Supported redis version**: redis >= 7.0
 **Advantages**: Efficient elimination, low memory consumption, and fast access bring new ideas to expiration algorithms      
 **Disadvantages**: Because the SORT_MODE implementation relies on the `unlink2` callback function (see this [PR](https://github.com/redis/redis/pull/8999))) to release the index structure synchronously, So currently only supports redis >= 7.0 and unstable branch  
 
 **Usage**: cmake with `-DSLAB_MODE=yes` option, and recompile
-### SCAN_MODE(default):
-- Do not sort TairHash globally
-- Each TairHash will still use a sort index to sort the fields internally
-- The built-in timer will periodically use the SCAN command to find the TairHash that contains the expired field, and then check the sort index inside the TairHash to eliminate the field
-- Every time you read or write a field, it will also trigger the expiration of the field itself
-- All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
-
-**Supported redis version**: redis >= 5.0
-
-**Advantages**: can run in the low version of redis (redis >= 5.0)  
-
-**Disadvantages**: low efficiency of expire elimination (compared with SORT mode)  
-
-**Usage**: cmake with `-DSORT_MODE=no` option, and recompile
 
 ## Event notification   
 

@@ -1077,7 +1077,6 @@ static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int 
     REDISMODULE_GET_API(GetServerVersion);
     REDISMODULE_GET_API(GetTypeMethodVersion);
 
-#ifdef REDISMODULE_EXPERIMENTAL_API
     REDISMODULE_GET_API(GetThreadSafeContext);
     REDISMODULE_GET_API(GetDetachedThreadSafeContext);
     REDISMODULE_GET_API(FreeThreadSafeContext);
@@ -1143,7 +1142,6 @@ static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int 
     REDISMODULE_GET_API(DefragCursorGet);
     REDISMODULE_GET_API(GetKeyNameFromDefragCtx);
     REDISMODULE_GET_API(GetDbIdFromDefragCtx);
-#endif
 
     if (RedisModule_IsModuleNameBusy && RedisModule_IsModuleNameBusy(name)) return REDISMODULE_ERR;
     RedisModule_SetModuleAttribs(ctx,name,ver,apiver);

@@ -23,8 +23,6 @@
 - Very low memory consumption, no memory copy in the index
 - Support field expired event notification (based on pubsub)
 
-## Data structure
-![avatar](imgs/tairhash_index2.png)  
 ## Active expiration
 ### SCAN_MODE(default):
 - Do not sort TairHash globally (Smaller memory overhead)
@@ -58,8 +56,6 @@
 **Usag**e: cmake with `-DSORT_MODE=yes` option, and recompile
 
 ### SLAB_MODE（slab模式）：
-
-![avatar](imgs/tairhash_slab_mode_index.jpg)
 
 - Slab mode is a low memory usage (compared with SORT mode), cache-friendly, high-performance expiration algorithm
 - Like SORT mode, keys are globally sorted to ensure that keys that need to be expired can be found faster. Unlike SORT mode, SLAB does not sort the fields inside the key, which saves memory overhead. 

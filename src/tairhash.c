@@ -46,7 +46,7 @@ static int redis_patch_ver = 0;
 m_zskiplist *g_expire_index[DB_NUM];
 #endif
 
-static RedisModuleTimerID expire_timer_id;
+RedisModuleTimerID g_expire_timer_id;
 ExpireAlgorithm g_expire_algorithm;
 
 void _moduleAssert(const char *estr, const char *file, int line) {
@@ -76,13 +76,8 @@ RedisModuleString *takeAndRef(RedisModuleString *str) {
 }
 
 int isExpire(long long when) {
-    /* No expire */
-    if (when == 0) {
-        return 0;
-    }
-
-    mstime_t now = RedisModule_Milliseconds();
-    return now > when;
+    if (when == 0) return 0;
+    return RedisModule_Milliseconds() > when;
 }
 
 int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *raw_key, tairHashObj *obj) {
@@ -99,9 +94,7 @@ int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModu
         RedisModuleCtx *ctx2 = RedisModule_GetThreadSafeContext(NULL);
         RedisModule_SelectDb(ctx2, RedisModule_GetSelectedDb(ctx));
         RedisModuleCallReply *reply = RedisModule_Call(ctx2, "DEL", "s!", raw_key);
-        if (reply != NULL) {
-            RedisModule_FreeCallReply(reply);
-        }
+        if (reply != NULL) RedisModule_FreeCallReply(reply);
         RedisModule_FreeThreadSafeContext(ctx2);
     } else {
         RedisModule_DeleteKey(key);
@@ -128,9 +121,7 @@ void notifyFieldSpaceEvent(char *event, RedisModuleString *key, RedisModuleStrin
         RedisModuleCtx *ctx = RedisModule_GetThreadSafeContext(NULL);
         RedisModule_SelectDb(ctx, dbid);
         RedisModuleCallReply *reply = RedisModule_Call(ctx, "PUBLISH", "ss", channel, message);
-        if (reply != NULL) {
-            RedisModule_FreeCallReply(reply);
-        }
+        if (reply != NULL) RedisModule_FreeCallReply(reply);
         RedisModule_FreeThreadSafeContext(ctx);
     }
 
@@ -272,7 +263,7 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
 
 restart:
     if (g_expire_algorithm.enable_active_expire) {
-        expire_timer_id = RedisModule_CreateTimer(ctx, g_expire_algorithm.active_expire_period, activeExpireTimerHandler, NULL);
+        g_expire_timer_id = RedisModule_CreateTimer(ctx, g_expire_algorithm.active_expire_period, activeExpireTimerHandler, NULL);
     }
 }
 
@@ -333,8 +324,7 @@ void flushDbCallback(RedisModuleCtx *ctx, RedisModuleEvent e, uint64_t sub, void
             m_zslFree(g_expire_index[fi->dbnum]);
             g_expire_index[fi->dbnum] = m_zslCreate();
         } else {
-            int i;
-            for (i = 0; i < DB_NUM; i++) {
+            for (int i = 0; i < DB_NUM; i++) {
                 m_zslFree(g_expire_index[i]);
                 g_expire_index[i] = m_zslCreate();
             }
@@ -446,9 +436,8 @@ void infoFunc(RedisModuleInfoCtx *ctx, int for_crash_report) {
     RedisModule_InfoAddFieldLongLong(ctx, "passive_expire_keys_per_loop", g_expire_algorithm.keys_per_passive_loop);
 
     RedisModule_InfoAddSection(ctx, "ActiveExpiredFields");
-    int i;
     char buf[10];
-    for (i = 0; i < DB_NUM; ++i) {
+    for (int i = 0; i < DB_NUM; ++i) {
         if (g_expire_index[i]->length == 0 && g_expire_algorithm.stat_active_expired_field[i] == 0) {
             continue;
         }
@@ -464,11 +453,11 @@ void startExpireTimer(RedisModuleCtx *ctx, void *data) {
         return;
     }
 
-    if (RedisModule_GetTimerInfo(ctx, expire_timer_id, NULL, NULL) == REDISMODULE_OK) {
+    if (RedisModule_GetTimerInfo(ctx, g_expire_timer_id, NULL, NULL) == REDISMODULE_OK) {
         return;
     }
 
-    expire_timer_id = RedisModule_CreateTimer(ctx, g_expire_algorithm.active_expire_period, activeExpireTimerHandler, data);
+    g_expire_timer_id = RedisModule_CreateTimer(ctx, g_expire_algorithm.active_expire_period, activeExpireTimerHandler, data);
 }
 
 static int mstrcasecmp(const RedisModuleString *rs1, const char *s2) {
@@ -490,7 +479,6 @@ static int mstrmatchlen(RedisModuleString *pattern, RedisModuleString *str, int 
 
 int tairHashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int argc, long long basetime, int unit) {
     RedisModule_AutoMemory(ctx);
-    int j;
 
     if (argc < 4 || argc > 7) {
         return RedisModule_WrongArity(ctx);
@@ -515,7 +503,7 @@ int tairHashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
     int ex_flags = TAIR_HASH_SET_NO_FLAGS;
 
     if (argc > 4) {
-        for (j = 4; j < argc; j++) {
+        for (int j = 4; j < argc; j++) {
             RedisModuleString *next = (j == argc - 1) ? NULL : argv[j + 1];
             if (!mstrcasecmp(argv[4], "ver") && !(ex_flags & TAIR_HASH_SET_WITH_ABS_VER) && !(ex_flags & TAIR_HASH_SET_WITH_GT_VER) && next) {
                 ex_flags |= TAIR_HASH_SET_WITH_VER;
@@ -1318,7 +1306,6 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     RedisModuleString *expire_p = NULL;
     RedisModuleString *version_p = NULL;
     RedisModuleString *min_p = NULL, *max_p = NULL;
-    int j;
     int ex_flags = TAIR_HASH_SET_NO_FLAGS;
     int nokey;
 
@@ -1336,7 +1323,7 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         return REDISMODULE_ERR;
     }
 
-    for (j = 4; j < argc; j++) {
+    for (int j = 4; j < argc; j++) {
         RedisModuleString *next = (j == argc - 1) ? NULL : argv[j + 1];
         if (!mstrcasecmp(argv[j], "ex") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && !(ex_flags & TAIR_HASH_SET_KEEPTTL) && next) {
             ex_flags |= TAIR_HASH_SET_EX;
@@ -1547,7 +1534,6 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
     RedisModuleString *expire_p = NULL;
     RedisModuleString *version_p = NULL;
     RedisModuleString *min_p = NULL, *max_p = NULL;
-    int j;
     int ex_flags = TAIR_HASH_SET_NO_FLAGS;
     int nokey = 0;
 
@@ -1565,7 +1551,7 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
         return REDISMODULE_ERR;
     }
 
-    for (j = 4; j < argc; j++) {
+    for (int j = 4; j < argc; j++) {
         RedisModuleString *next = (j == argc - 1) ? NULL : argv[j + 1];
 
         if (!mstrcasecmp(argv[j], "ex") && !(ex_flags & TAIR_HASH_SET_PX) && !(ex_flags & TAIR_HASH_SET_EX) && !(ex_flags & TAIR_HASH_SET_KEEPTTL) && next) {
@@ -2080,8 +2066,6 @@ int TairHashTypeHdelRepl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **a
 /* EXHDELWITHVER <key> <field> version> <field> <version> ...*/
 int TairHashTypeHdelWithVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     RedisModule_AutoMemory(ctx);
-    static int i = 0;
-    i++;
 
     if (argc < 4 || ((argc - 2) % 2) != 0) {
         return RedisModule_WrongArity(ctx);
@@ -2695,8 +2679,8 @@ int TairHashTypeActiveExpireInfo_RedisCommand(RedisModuleCtx *ctx, RedisModuleSt
     d_len = strlen(DB_DETAIL);
     strncat(buf, DB_DETAIL, d_len);
     t_size += d_len;
-    int i;
-    for (i = 0; i < DB_NUM; ++i) {
+
+    for (int i = 0; i < DB_NUM; ++i) {
         if (g_expire_algorithm.stat_active_expired_field[i] == 0) {
             continue;
         }
@@ -2989,6 +2973,20 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
         return REDISMODULE_ERR;
     }
 
+    if (RedisModule_GetServerVersion) {
+        int version = RedisModule_GetServerVersion();
+        redis_patch_ver = version & 0x000000ff;
+        redis_minor_ver = (version & 0x0000ff00) >> 8;
+        redis_major_ver = (version & 0x00ff0000) >> 16;
+    }
+
+#if defined(SORT_MODE) || defined(SLAB_MODE)
+    if (redis_major_ver < 7) {
+        RedisModule_Log(ctx, "warning", "Redis version (%d.%d.%d) is too old, please upgrade to 7.0.0 or above", redis_major_ver, redis_minor_ver, redis_patch_ver);
+        return REDISMODULE_ERR;
+    }
+#endif
+
     g_expire_algorithm.enable_active_expire = 1;
     g_expire_algorithm.active_expire_period = TAIR_HASH_ACTIVE_EXPIRE_PERIOD;
     g_expire_algorithm.dbs_per_active_loop = TAIR_HASH_ACTIVE_DBS_PER_CALL;
@@ -3064,9 +3062,7 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
     for (int i = 0; i < DB_NUM; i++) {
         g_expire_index[i] = m_zslCreate();
     }
-#endif
 
-#if defined(SORT_MODE) || defined(SLAB_MODE)
     RedisModule_SubscribeToServerEvent(ctx, RedisModuleEvent_SwapDB, swapDbCallback);
     RedisModule_SubscribeToServerEvent(ctx, RedisModuleEvent_FlushDB, flushDbCallback);
     RedisModule_SubscribeToKeyspaceEvents(ctx, REDISMODULE_NOTIFY_GENERIC, keySpaceNotification);
@@ -3093,19 +3089,5 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
         startExpireTimer(ctx2, NULL);
         RedisModule_FreeThreadSafeContext(ctx2);
     }
-
-    if (RedisModule_GetServerVersion) {
-        int version = RedisModule_GetServerVersion();
-        redis_patch_ver = version & 0x000000ff;
-        redis_minor_ver = (version & 0x0000ff00) >> 8;
-        redis_major_ver = (version & 0x00ff0000) >> 16;
-    }
-
-#if defined(SORT_MODE) || defined(SLAB_MODE)
-    if (redis_major_ver < 7) {
-        RedisModule_Log(ctx, "warning", "Redis version is too old, please upgrade to 7.0.0 or above");
-        return REDISMODULE_ERR;
-    }
-#endif
     return REDISMODULE_OK;
 }

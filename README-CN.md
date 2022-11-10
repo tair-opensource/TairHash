@@ -22,9 +22,6 @@
 - 低内存占用，索引中无内存拷贝
 - 支持field过期删除事件通知（基于pubsub）
 
-## 数据结构
-![avatar](imgs/tairhash_index2.png)  
-
 ## 主动过期
 
 ### SCAN_MODE（扫描模式）：
@@ -41,8 +38,6 @@
 **使用方式**：cmake的时候加上`-DSORT_MODE=no`选项，并重新编译
 ### SORT_MODE（排序模式）：
 
-![avatar](imgs/tairhash_index.png)
-
 - 使用两级排序索引，第一级对tairhash主key进行排序，第二级针对每个tairhash内部的field进行排序
 - 第一级排序使用第二级排序里最小的ttl进行排序，因此主key是按照ttl全局有序的
 - 内置定时器会周期扫描第一级索引，找出一部分已经过期的key，然后分别再检查这些key的二级索引，进行field的淘汰，也就是active expire
@@ -56,8 +51,6 @@
 
 **使用方式**：cmake的时候加上`-DSORT_MODE=yes`选项，并重新编译
 ### SLAB_MODE（slab模式）：
-
-![avatar](imgs/tairhash_slab_mode_index.jpg)
 
 - SLAB模式是一种节省内存，缓存友好，高性能的过期算法
 - 和SORT模式一样，也会依赖key的全局排序索引进行过期key的快速查找。和SORT模式不同的是，SLAB不会对key内部的field进行排序索引，相反他们是无序的，这样可以节省索引内存开销‘

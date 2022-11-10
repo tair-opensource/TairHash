@@ -48,9 +48,9 @@ void delete(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
         m_zslDelete(o->expire_index, cur_expire, field, NULL);
         if (o->expire_index->header->level[0].forward) {
             long long after_min_score = o->expire_index->header->level[0].forward->score;
-            m_zslUpdateScore(g_expire_index[dbid], before_min_score, field, after_min_score);
+            m_zslUpdateScore(g_expire_index[dbid], before_min_score, key, after_min_score);
         } else {
-            m_zslDelete(g_expire_index[dbid], before_min_score, field, NULL);
+            m_zslDelete(g_expire_index[dbid], before_min_score, key, NULL);
         }
     }
 }

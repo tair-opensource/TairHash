@@ -220,7 +220,8 @@ static struct tairHashObj *createTairHashTypeObject() {
 }
 
 int isReadOnlyStatus(RedisModuleCtx *ctx) {
-    if (RedisModule_GetContextFlags(ctx) & REDISMODULE_CTX_FLAGS_SLAVE) {
+    int flags = RedisModule_GetContextFlags(ctx);
+    if (flags & REDISMODULE_CTX_FLAGS_SLAVE || flags & REDISMODULE_CTX_FLAGS_READONLY) {
         return 1;
     }
 
@@ -277,6 +278,9 @@ restart:
 
 int fieldExpireIfNeeded(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, int is_timer) {
     TairHashVal *tair_hash_val = m_dictFetchValue(o->hash, field);
+    if (tair_hash_val == NULL) {
+        return 0;
+    }
     long long when = tair_hash_val->expire;
     if (when == 0) {
         return 0;

@@ -85,9 +85,9 @@ typedef struct ExpireAlgorithm {
     void (*insert)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long expire);
     void (*update)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long cur_expire, long long new_expire);
     void (*delete)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long expire);
+    void (*deleteAndPropagate)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long expire, int is_timer);
     void (*activeExpire)(RedisModuleCtx *ctx, int dbid, uint64_t keys);
     void (*passiveExpire)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key_per_loop);
-    int (*expireIfNeeded)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, int is_timer);
 
     int enable_active_expire;
     uint64_t active_expire_period;
@@ -106,3 +106,4 @@ RedisModuleString *takeAndRef(RedisModuleString *str);
 int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *raw_key, tairHashObj *obj);
 void notifyFieldSpaceEvent(char *event, RedisModuleString *key, RedisModuleString *field, int dbid);
 int isExpire(long long when);
+int fieldExpireIfNeeded(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, int is_timer);

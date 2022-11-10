@@ -17,10 +17,9 @@
 
 ### The main features：
 
-- Field supports setting expiration and version
+- Supports all redis hash commands
+- Supports setting expiration and version for field
 - Support efficient active expiration (SCAN mode, SORT mode and SLAB mode) and passivity expiration for field
-- The cmd is similar to the redis hash
-- Very low memory consumption, no memory copy in the index
 - Support field expired event notification (based on pubsub)
 
 ## Active expiration
@@ -37,7 +36,7 @@
 
 **Disadvantages**: low efficiency of expire elimination (compared with SORT mode and SLAB mode)  
 
-**Usage**: cmake with `-DSORT_MODE=no` option, and recompile
+**Usage**: cmake with default option, and recompile
 
 ### SORT_MODE：
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
@@ -51,19 +50,21 @@
 
 **Advantages**: higher efficiency of expire elimination     
 
-**Disadvantages**: Because the SORT_MODE implementation relies on the `unlink2` callback function (see this [PR](https://github.com/redis/redis/pull/8999))) to release the index structure synchronously, So currently only supports redis >= 7.0 and unstable branch  
+**Disadvantages**: More memory consumption  
 
 **Usag**e: cmake with `-DSORT_MODE=yes` option, and recompile
 
-### SLAB_MODE（slab模式）：
+### SLAB_MODE：
 
 - Slab mode is a low memory usage (compared with SORT mode), cache-friendly, high-performance expiration algorithm
 - Like SORT mode, keys are globally sorted to ensure that keys that need to be expired can be found faster. Unlike SORT mode, SLAB does not sort the fields inside the key, which saves memory overhead. 
 - The SLAB expiration algorithm uses SIMD instructions (when supported by the hardware) to speed up the search for expired fields
 
-**Supported redis version**: redis >= 7.0
-**Advantages**: Efficient elimination, low memory consumption, and fast access bring new ideas to expiration algorithms      
-**Disadvantages**: Because the SORT_MODE implementation relies on the `unlink2` callback function (see this [PR](https://github.com/redis/redis/pull/8999))) to release the index structure synchronously, So currently only supports redis >= 7.0 and unstable branch  
+**Supported redis version**: redis >= 7.0  
+
+**Advantages**: Efficient elimination, low memory consumption, and fast access bring new ideas to expiration algorithms   
+
+**Disadvantages**: More memory consumption    
 
 **Usage**: cmake with `-DSLAB_MODE=yes` option, and recompile
 

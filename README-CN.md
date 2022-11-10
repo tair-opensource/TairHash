@@ -16,10 +16,9 @@
 
 ### 主要的特性如下：
 
+- 支持redis hash的所有命令语义
 - field支持单独设置expire和version
 - 针对field支持高效的active expire和passivity expire，其中active expire支持SCAN_MODE、SORT_MODE和SLAB_MODE模式。
-- 语法和原生hash数据类型类似
-- 低内存占用，索引中无内存拷贝
 - 支持field过期删除事件通知（基于pubsub）
 
 ## 主动过期
@@ -33,9 +32,9 @@
 
 **支持的redis版本**: redis >= 5.0  
 **优点**：可以运行在低版本的redis中（redis >= 5.0 ）      
-**缺点**：过期淘汰效率较低（相对SORT模式而言）  
+**缺点**：过期淘汰效率较低（相对SORT模式而言，特别是redis中含有过多的干扰key时）  
 
-**使用方式**：cmake的时候加上`-DSORT_MODE=no`选项，并重新编译
+**使用方式**：以默认选项执行cmake，并重新编译
 ### SORT_MODE（排序模式）：
 
 - 使用两级排序索引，第一级对tairhash主key进行排序，第二级针对每个tairhash内部的field进行排序
@@ -45,9 +44,9 @@
 - 每一次读写field，也会触发对这个field自身的过期淘汰操作
 - 排序中所有的key和field都是指针引用，无内存拷贝，无内存膨胀问题
 
-**支持的redis版本**: redis >= 7.0
-**优点**：过期淘汰效率比较高    
-**缺点**：由于SORT_MODE实现依赖`unlink2`回调函数(见这个[PR](https://github.com/redis/redis/pull/8999)))同步释放索引结构，因此需要较高的redis版本支持。
+**支持的redis版本**: redis >= 7.0  
+**优点**：过期淘汰效率比较高      
+**缺点**：更多的内存消耗  
 
 **使用方式**：cmake的时候加上`-DSORT_MODE=yes`选项，并重新编译
 ### SLAB_MODE（slab模式）：
@@ -56,9 +55,11 @@
 - 和SORT模式一样，也会依赖key的全局排序索引进行过期key的快速查找。和SORT模式不同的是，SLAB不会对key内部的field进行排序索引，相反他们是无序的，这样可以节省索引内存开销‘
 - SLAB过期算法使用SIMD指令（当硬件支持时）来加速对过期field的查找
 
-**支持的redis版本**: redis >= 7.0
-**优点**：高效淘汰，低内存消耗，快速访问，为过期算法带来新思路   
-**缺点**：由于SLAB_MODE实现依赖`unlink2`回调函数(见这个[PR](https://github.com/redis/redis/pull/8999)))同步释放索引结构，因此需要较高的redis版本支持。
+**支持的redis版本**: redis >= 7.0  
+
+**优点**：高效淘汰，低内存消耗，快速访问，为过期算法带来新思路  
+
+**缺点**：更多的内存消耗  
 
 **使用方式**：cmake的时候加上`-DSLAB_MODE=yes`选项，并重新编译
 

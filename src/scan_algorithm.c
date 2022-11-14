@@ -199,7 +199,8 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
         ln = tair_hash_obj->expire_index->header->level[0].forward;
         while (ln && keys_per_loop) {
             field = ln->member;
-            if (fieldExpireIfNeeded(ctx, dbid, key, tair_hash_obj, field, 1)) {
+            if (fieldExpireIfNeeded(ctx, dbid, key, tair_hash_obj, field, 0)) {
+                g_expire_algorithm.stat_passive_expired_field[dbid]++;
                 start_index++;
                 keys_per_loop--;
             } else {

@@ -272,6 +272,7 @@ int fieldExpireIfNeeded(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, t
     if (tair_hash_val == NULL) {
         return 0;
     }
+
     long long when = tair_hash_val->expire;
     if (when == 0) {
         return 0;
@@ -310,6 +311,10 @@ void swapDbCallback(RedisModuleCtx *ctx, RedisModuleEvent e, uint64_t sub, void 
     uint64_t tmp_stat = g_expire_algorithm.stat_active_expired_field[from_dbid];
     g_expire_algorithm.stat_active_expired_field[from_dbid] = g_expire_algorithm.stat_active_expired_field[to_dbid];
     g_expire_algorithm.stat_active_expired_field[to_dbid] = tmp_stat;
+
+    tmp_stat = g_expire_algorithm.stat_passive_expired_field[from_dbid];
+    g_expire_algorithm.stat_passive_expired_field[from_dbid] = g_expire_algorithm.stat_passive_expired_field[to_dbid];
+    g_expire_algorithm.stat_passive_expired_field[to_dbid] = tmp_stat;
 }
 
 void flushDbCallback(RedisModuleCtx *ctx, RedisModuleEvent e, uint64_t sub, void *data) {
@@ -443,6 +448,15 @@ void infoFunc(RedisModuleInfoCtx *ctx, int for_crash_report) {
         }
         snprintf(buf, sizeof(buf), "db%d", i);
         RedisModule_InfoAddFieldLongLong(ctx, buf, g_expire_algorithm.stat_active_expired_field[i]);
+    }
+
+    RedisModule_InfoAddSection(ctx, "PassiveExpiredFields");
+    for (int i = 0; i < DB_NUM; ++i) {
+        if (g_expire_index[i]->length == 0 && g_expire_algorithm.stat_passive_expired_field[i] == 0) {
+            continue;
+        }
+        snprintf(buf, sizeof(buf), "db%d", i);
+        RedisModule_InfoAddFieldLongLong(ctx, buf, g_expire_algorithm.stat_passive_expired_field[i]);
     }
 }
 
@@ -2681,7 +2695,7 @@ int TairHashTypeActiveExpireInfo_RedisCommand(RedisModuleCtx *ctx, RedisModuleSt
     t_size += d_len;
 
     for (int i = 0; i < DB_NUM; ++i) {
-        if (g_expire_algorithm.stat_active_expired_field[i] == 0) {
+        if (g_expire_algorithm.stat_active_expired_field[i] == 0 && g_expire_algorithm.stat_passive_expired_field[i] == 0) {
             continue;
         }
         RedisModuleString *info_d = RedisModule_CreateStringPrintf(ctx, "db: %d, active_expired_fields: %ld, passive_expired_fields: %ld\r\n", i,

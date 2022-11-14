@@ -27,7 +27,6 @@
 - Do not sort TairHash globally (Smaller memory overhead)
 - Each TairHash will still use a sort index to sort the fields internally (For expiration efficiency)
 - The built-in timer will periodically use the SCAN command to find the TairHash that contains the expired field, and then check the sort index inside the TairHash to eliminate the field
-- Every time you read or write a field, it will also trigger the expiration of the field itself
 - All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
 **Supported redis version**: redis >= 5.0
@@ -42,8 +41,6 @@
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
 - The first-level uses the smallest ttl in the second-level for sorting, so the main key is globally ordered
 - The built-in timer will periodically scan the first-level index to find out a key that has expired, and then check the secondary index of these keys to eliminate the expired fields. This is the active expire
-- Every time a write operation to tairhash, the first level index will be checked first, and at most three fields will be expired, Note these fields may not belong to the key currently being operated, so in theory, the faster you write, the faster the elimination
-- Every time you read or write a field, it will also trigger the expiration of the field itself
 - All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
 **Supported redis version**: redis >= 7.0
@@ -54,8 +51,7 @@
 
 **Usag**e: cmake with `-DSORT_MODE=yes` option, and recompile
 
-### SLAB_MODE：
-
+### SLAB_MODE：  
 - Slab mode is a low memory usage (compared with SORT mode), cache-friendly, high-performance expiration algorithm
 - Like SORT mode, keys are globally sorted to ensure that keys that need to be expired can be found faster. Unlike SORT mode, SLAB does not sort the fields inside the key, which saves memory overhead. 
 - The SLAB expiration algorithm uses SIMD instructions (when supported by the hardware) to speed up the search for expired fields
@@ -67,6 +63,11 @@
 **Disadvantages**: More memory consumption    
 
 **Usage**: cmake with `-DSLAB_MODE=yes` option, and recompile
+
+## Passivity expiration  
+- Every time you read or write a field, it will also trigger the expiration of the field itself  
+- Every time you write a field, tairhash also checks whether other fields (may belong to other keys) are expired (currently up to 3 at a time), because fields are sorted by TTL, so this check will be very efficient (Note: SLAB_MODE does not support this feature)
+
 
 ## Event notification   
 

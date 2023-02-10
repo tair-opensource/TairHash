@@ -2892,6 +2892,51 @@ size_t TairHashTypeEffort2(RedisModuleKeyOptCtx *ctx, const void *value) {
     tairHashObj *o = (tairHashObj *)value;
     return dictSize(o->hash) + o->expire_index->length;
 }
+#else
+
+size_t TairHashTypeMemUsage(const void *value) {
+    tairHashObj *o = (tairHashObj *)value;
+
+    uint64_t size = 0;
+    RedisModuleString *skey;
+    size_t skeylen = 0;
+
+    if (!o) {
+        return size;
+    }
+
+    m_dictIterator *di;
+    m_dictEntry *de;
+
+    if (o->hash) {
+        size += sizeof(*o);
+
+        di = m_dictGetIterator(o->hash);
+        while ((de = m_dictNext(di)) != NULL) {
+            TairHashVal *val = (TairHashVal *)dictGetVal(de);
+            skey = dictGetKey(de);
+            size += sizeof(*val);
+            RedisModule_StringPtrLen(skey, &skeylen);
+            size += skeylen;
+            size_t len;
+            RedisModule_StringPtrLen(val->value, &len);
+            size += len;
+        }
+        m_dictReleaseIterator(di);
+    }
+
+    if (o->expire_index) {
+        size += o->expire_index->length * sizeof(m_zskiplistNode);
+    }
+
+    return size;
+}
+
+size_t TairHashTypeEffort(RedisModuleString *key, const void *value) {
+    REDISMODULE_NOT_USED(key);
+    tairHashObj *o = (tairHashObj *)value;
+    return dictSize(o->hash) + o->expire_index->length;
+}
 
 #endif
 
@@ -3061,6 +3106,9 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
         .copy2 = TairHashTypeCopy2,
         .free_effort2 = TairHashTypeEffort2,
         .mem_usage2 = TairHashTypeMemUsage2,
+#else
+        .mem_usage = TairHashTypeMemUsage,
+        .free_effort = TairHashTypeEffort,
 #endif
     };
 

@@ -1382,6 +1382,25 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal $res "tairhash-"
     }
 
+    test {tairhash memusage} {
+        r del tairhashkey
+
+        assert_equal 1 [r exhset tairhashkey field1 val1]
+
+        set usage1 [r memory usage tairhashkey]
+
+        assert_equal 1 [r exhset tairhashkey field2 val2]
+
+        set usage2 [r memory usage tairhashkey]
+
+        assert_equal 1 [r exhset tairhashkey field3 val3]
+
+        set usage3 [r memory usage tairhashkey]
+
+        assert {$usage2 > $usage1}
+        assert {$usage3 > $usage2}
+    }
+
     test {tairhash get when last field expired} {
         r del tairhashkey
 

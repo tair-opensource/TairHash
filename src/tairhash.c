@@ -2664,22 +2664,22 @@ int TairHashTypeActiveExpireInfo_RedisCommand(RedisModuleCtx *ctx, RedisModuleSt
         ctx,
         "\r\n"
         "# Active expire statistics\r\n"
-        "enable_active_expire:%d\r\n"
-        "tair_hash_active_expire_period:%lld\r\n"
-        "tair_hash_active_expire_keys_per_loop:%lld\r\n"
-        "tair_hash_active_expire_dbs_per_loop:%lld\r\n"
-        "tair_hash_active_expire_last_time_msec:%lld\r\n"
-        "tair_hash_active_expire_max_time_msec:%lld\r\n"
-        "tair_hash_active_expire_avg_time_msec:%lld\r\n"
-        "tair_hash_passive_expire_keys_per_loop:%lld\r\n",
-        g_expire_algorithm.enable_active_expire,
-        g_expire_algorithm.active_expire_period,
-        g_expire_algorithm.keys_per_active_loop,
-        g_expire_algorithm.dbs_per_active_loop,
-        g_expire_algorithm.stat_last_active_expire_time_msec,
-        g_expire_algorithm.stat_max_active_expire_time_msec,
-        g_expire_algorithm.stat_avg_active_expire_time_msec,
-        g_expire_algorithm.keys_per_passive_loop);
+        "enable_active_expire:%ld\r\n"
+        "tair_hash_active_expire_period:%ld\r\n"
+        "tair_hash_active_expire_keys_per_loop:%ld\r\n"
+        "tair_hash_active_expire_dbs_per_loop:%ld\r\n"
+        "tair_hash_active_expire_last_time_msec:%ld\r\n"
+        "tair_hash_active_expire_max_time_msec:%ld\r\n"
+        "tair_hash_active_expire_avg_time_msec:%ld\r\n"
+        "tair_hash_passive_expire_keys_per_loop:%ld\r\n",
+        (long)g_expire_algorithm.enable_active_expire,
+        (long)g_expire_algorithm.active_expire_period,
+        (long)g_expire_algorithm.keys_per_active_loop,
+        (long)g_expire_algorithm.dbs_per_active_loop,
+        (long)g_expire_algorithm.stat_last_active_expire_time_msec,
+        (long) g_expire_algorithm.stat_max_active_expire_time_msec,
+        (long)g_expire_algorithm.stat_avg_active_expire_time_msec,
+        (long)g_expire_algorithm.keys_per_passive_loop);
 
     size_t a_len, d_len, t_size = 0;
     const char *a_buf = RedisModule_StringPtrLen(info_a, &a_len);

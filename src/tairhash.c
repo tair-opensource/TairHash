@@ -55,13 +55,13 @@ void _moduleAssert(const char *estr, const char *file, int line) {
     *((char *)-1) = 'x';
 }
 
-inline struct TairHashVal *createTairHashVal(void) {
+struct TairHashVal *createTairHashVal(void) {
     struct TairHashVal *o;
     o = RedisModule_Calloc(1, sizeof(*o));
     return o;
 }
 
-inline void tairHashValRelease(struct TairHashVal *o) {
+void tairHashValRelease(struct TairHashVal *o) {
     if (o) {
         if (o->value) {
             RedisModule_FreeString(NULL, o->value);

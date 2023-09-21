@@ -185,7 +185,7 @@ jobs:
        git clone https://github.com/redis/redis
        cd redis
        git checkout 7.0
-       make SANITIZER=address REDIS_CFLAGS='-Werror' BUILD_TLS=yes
+       make SANITIZER=address REDIS_CFLAGS='-Werror' BUILD_TLS=yes MALLOC=libc
     - name: Install LCOV
       run: |
         sudo apt-get --assume-yes install lcov > /dev/null

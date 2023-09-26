@@ -55,13 +55,13 @@ void _moduleAssert(const char *estr, const char *file, int line) {
     *((char *)-1) = 'x';
 }
 
-inline struct TairHashVal *createTairHashVal(void) {
+struct TairHashVal *createTairHashVal(void) {
     struct TairHashVal *o;
     o = RedisModule_Calloc(1, sizeof(*o));
     return o;
 }
 
-inline void tairHashValRelease(struct TairHashVal *o) {
+void tairHashValRelease(struct TairHashVal *o) {
     if (o) {
         if (o->value) {
             RedisModule_FreeString(NULL, o->value);
@@ -83,6 +83,14 @@ int isExpire(long long when) {
 int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *raw_key, tairHashObj *obj) {
     if (!obj || (RedisModule_GetContextFlags(ctx) & REDISMODULE_CTX_FLAGS_SLAVE) || (dictSize(obj->hash) != 0)) {
         return 0;
+    }
+
+    if (key == NULL) {
+        key = RedisModule_OpenKey(ctx, raw_key, REDISMODULE_WRITE);
+        if (RedisModule_KeyType(key) == REDISMODULE_KEYTYPE_EMPTY) {
+            RedisModule_CloseKey(key);
+            return 0;
+        }
     }
 
     if (redis_major_ver < 6 || (redis_major_ver == 6 && redis_minor_ver < 2)) {

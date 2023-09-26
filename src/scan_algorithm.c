@@ -55,6 +55,7 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
 
     RedisModuleString *key, *field;
     RedisModuleKey *real_key;
+    int may_delkey = 0;
 
     long long when, now;
     unsigned long zsl_len;
@@ -79,8 +80,7 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
                 Module_Assert(RedisModule_CallReplyType(keys_reply) == REDISMODULE_REPLY_ARRAY);
                 size_t keynum = RedisModule_CallReplyLength(keys_reply);
 
-                int j;
-                for (j = 0; j < keynum; j++) {
+                for (int j = 0; j < keynum; j++) {
                     RedisModuleCallReply *key_reply = RedisModule_CallReplyArrayElement(keys_reply, j);
                     Module_Assert(RedisModule_CallReplyType(key_reply) == REDISMODULE_REPLY_STRING);
                     key = RedisModule_CreateStringFromCallReply(key_reply);
@@ -89,8 +89,10 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
                        return REDISMODULE_KEYTYPE_EMPTY here, so we must deal with it until after this
                        bugfix: https://github.com/redis/redis/commit/1833d008b3af8628835b5f082c5b4b1359557893 */
                     if (RedisModule_KeyType(real_key) == REDISMODULE_KEYTYPE_EMPTY) {
+                        RedisModule_CloseKey(real_key);
                         continue;
                     }
+
                     if (RedisModule_ModuleTypeGetType(real_key) == TairHashType) {
                         tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
                         if (tair_hash_obj->expire_index->length > 0) {
@@ -117,6 +119,7 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
     m_listNode *node;
     while ((node = listFirst(keys)) != NULL) {
         key = listNodeValue(node);
+        may_delkey = 0;
         real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE | REDISMODULE_OPEN_KEY_NOTOUCH);
         int type = RedisModule_KeyType(real_key);
         if (type != REDISMODULE_KEYTYPE_EMPTY) {
@@ -124,10 +127,20 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
         } else {
             /* Note: redis scan may return dup key. */
             m_listDelNode(keys, node);
+            RedisModule_CloseKey(real_key);
             continue;
         }
 
+        mstime_t key_ttl = RedisModule_GetExpire(real_key);
+        if (key_ttl != REDISMODULE_NO_EXPIRE && key_ttl < 1000) { // 
+            may_delkey = 1;
+        }
+
         tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
+        if (dictSize(tair_hash_obj->hash) == 1) {
+            may_delkey = 1;
+        }
+        RedisModule_CloseKey(real_key);
 
         zsl_len = tair_hash_obj->expire_index->length;
         Module_Assert(zsl_len > 0);
@@ -140,15 +153,30 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
                 g_expire_algorithm.stat_active_expired_field[dbid]++;
                 start_index++;
                 expire_keys_per_loop--;
+                if (may_delkey) {
+                    break;
+                }
             } else {
                 break;
             }
             ln2 = ln2->level[0].forward;
         }
 
+        // If the key happens to expire, it will be released in fieldExpireIfNeeded.
+        if (may_delkey) {
+            real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_OPEN_KEY_NOTOUCH);
+            int type = RedisModule_KeyType(real_key);
+            if (type == REDISMODULE_KEYTYPE_EMPTY) {
+                m_listDelNode(keys, node);
+                RedisModule_CloseKey(real_key);
+                continue;
+            } 
+            RedisModule_CloseKey(real_key);
+        }
+
         if (start_index) {
             m_zslDeleteRangeByRank(tair_hash_obj->expire_index, 1, start_index);
-            delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj);
+            delEmptyTairHashIfNeeded(ctx, NULL, key, tair_hash_obj);
         }
         m_listDelNode(keys, node);
     }
@@ -164,6 +192,7 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
     RedisModuleString *field;
     RedisModuleKey *real_key;
     unsigned long zsl_len;
+    int may_delkey = 0;
     /* 1. The current db does not have a key that needs to expire. */
     list *keys = m_listCreate();
 
@@ -186,6 +215,7 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
     m_listNode *node;
     while ((node = listFirst(keys)) != NULL) {
         key = listNodeValue(node);
+        may_delkey = 0;
         real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE);
         int type = RedisModule_KeyType(real_key);
 
@@ -195,6 +225,17 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
         zsl_len = tair_hash_obj->expire_index->length;
         Module_Assert(zsl_len > 0);
 
+        mstime_t key_ttl = RedisModule_GetExpire(real_key);
+        if (key_ttl != REDISMODULE_NO_EXPIRE && key_ttl < 100) { // 100ms
+            may_delkey = 1;
+        }
+
+        tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
+        if (dictSize(tair_hash_obj->hash) == 1) {
+            may_delkey = 1;
+        }
+        RedisModule_CloseKey(real_key);
+
         start_index = 0;
         ln = tair_hash_obj->expire_index->header->level[0].forward;
         while (ln && keys_per_loop) {
@@ -203,17 +244,29 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
                 g_expire_algorithm.stat_passive_expired_field[dbid]++;
                 start_index++;
                 keys_per_loop--;
+                if (may_delkey) {
+                    break;
+                }
             } else {
                 break;
             }
             ln = ln->level[0].forward;
         }
 
+        if (may_delkey) {
+            real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_OPEN_KEY_NOTOUCH);
+            int type = RedisModule_KeyType(real_key);
+            if (type == REDISMODULE_KEYTYPE_EMPTY) {
+                m_listDelNode(keys, node);
+                RedisModule_CloseKey(real_key);
+                continue;
+            } 
+            RedisModule_CloseKey(real_key);
+        }
+
         if (start_index) {
             m_zslDeleteRangeByRank(tair_hash_obj->expire_index, 1, start_index);
-            if (!delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj)) {
-                RedisModule_CloseKey(real_key);
-            }
+            delEmptyTairHashIfNeeded(ctx, NULL, key, tair_hash_obj);
         }
         m_listDelNode(keys, node);
     }

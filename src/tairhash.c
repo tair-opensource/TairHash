@@ -85,6 +85,14 @@ int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModu
         return 0;
     }
 
+    if (key == NULL) {
+        key = RedisModule_OpenKey(ctx, raw_key, REDISMODULE_WRITE);
+        if (RedisModule_KeyType(key) == REDISMODULE_KEYTYPE_EMPTY) {
+            RedisModule_CloseKey(key);
+            return 0;
+        }
+    }
+
     if (redis_major_ver < 6 || (redis_major_ver == 6 && redis_minor_ver < 2)) {
         /* See bugfix: https://github.com/redis/redis/pull/8617
                        https://github.com/redis/redis/pull/8097

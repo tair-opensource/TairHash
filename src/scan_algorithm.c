@@ -239,6 +239,7 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
         start_index = 0;
         ln = tair_hash_obj->expire_index->header->level[0].forward;
         while (ln && keys_per_loop) {
+            m_zskiplistNode *next = ln->level[0].forward;
             field = ln->member;
             if (fieldExpireIfNeeded(ctx, dbid, key, tair_hash_obj, field, 0)) {
                 g_expire_algorithm.stat_passive_expired_field[dbid]++;
@@ -250,7 +251,7 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
             } else {
                 break;
             }
-            ln = ln->level[0].forward;
+            ln = next;
         }
 
         if (may_delkey) {
@@ -265,7 +266,6 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
         }
 
         if (start_index) {
-            m_zslDeleteRangeByRank(tair_hash_obj->expire_index, 1, start_index);
             delEmptyTairHashIfNeeded(ctx, NULL, key, tair_hash_obj);
         }
         m_listDelNode(keys, node);

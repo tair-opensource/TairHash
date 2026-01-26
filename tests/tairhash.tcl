@@ -2132,4 +2132,102 @@ start_server {tags {"slab_bug_reproduce"}} {
         # Just ensure it didn't crash
         r ping
     }
+
+    test "Test Slab churn with updates and deletes" {
+        set key "test_slab_churn"
+        r del $key
+
+        # insert enough items to span multiple slabs
+        for {set i 0} {$i < 1200} {incr i} {
+            r exhset $key field_$i val ex 10
+        }
+
+        # update half of them to a later expire, delete some
+        for {set i 0} {$i < 600} {incr i} {
+            r exhset $key field_$i val ex 20
+        }
+        for {set i 600} {$i < 900} {incr i} {
+            r exhdel $key field_$i
+        }
+
+        assert_equal 900 [r exhlen $key]
+
+        # verify remaining fields exist
+        for {set i 0} {$i < 600} {incr i} {
+            assert_equal "val" [r exhget $key field_$i]
+        }
+        for {set i 900} {$i < 1200} {incr i} {
+            assert_equal "val" [r exhget $key field_$i]
+        }
+    }
+
+    test "Test Slab delete non-existing fields" {
+        set key "test_slab_del_missing"
+        r del $key
+        for {set i 0} {$i < 300} {incr i} {
+            r exhset $key field_$i val ex 5
+        }
+
+        # delete existing and non-existing fields mixed
+        for {set i 0} {$i < 600} {incr i} {
+            r exhdel $key field_$i
+        }
+
+        assert_equal 0 [r exhlen $key]
+        assert_equal 0 [r exists $key]
+    }
+
+    test "Test Slab expire boundary and fast TTL" {
+        set key "test_slab_fast_ttl"
+        r del $key
+
+        # very small ttl
+        r exhset $key field1 val PX 1
+        r exhset $key field2 val PX 2
+        r exhset $key field3 val EX 1
+
+        after 3000
+
+        assert_equal 0 [r exhlen $key]
+        assert_equal "" [r exhget $key field1]
+        assert_equal "" [r exhget $key field2]
+        assert_equal "" [r exhget $key field3]
+    }
+
+    test "Test Slab same field repeated set/del" {
+        set key "test_slab_repeat"
+        r del $key
+
+        for {set i 0} {$i < 500} {incr i} {
+            r exhset $key field val ex [expr {($i % 3) + 1}]
+            if {$i % 2 == 0} {
+                r exhdel $key field
+            }
+        }
+
+        # final set to ensure field exists
+        r exhset $key field val ex 2
+        assert_equal 1 [r exhexists $key field]
+    }
+
+    test "Test Slab scan during expirations" {
+        set key "test_slab_scan"
+        r del $key
+
+        for {set i 0} {$i < 800} {incr i} {
+            r exhset $key field_$i val ex 1
+        }
+
+        after 1500
+
+        # scan should not crash even if most fields expired
+        set cur 0
+        while 1 {
+            set res [r exhscan $key $cur]
+            set cur [lindex $res 0]
+            if {$cur == 0} break
+        }
+
+        assert_equal 0 [r exhlen $key]
+    }
 }

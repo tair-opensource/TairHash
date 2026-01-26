@@ -212,7 +212,14 @@ void slab_expireDelete(tairhash_zskiplist *zsl, RedisModuleString *key, long lon
 
     if (update_findNode) {  // update min value
         int smallest_subscript = slab_minExpireTimeIndex(find_slab);
-        find_node->expire_min = find_slab->expires[smallest_subscript], find_node->key_min = find_slab->keys[smallest_subscript];
+        long long new_expire_min = find_slab->expires[smallest_subscript];
+        RedisModuleString *new_key_min = find_slab->keys[smallest_subscript];
+        if (new_expire_min != find_node->expire_min || RedisModule_StringCompare(new_key_min, find_node->key_min) != 0) {
+            Slab *slab = find_node->slab;
+            int ret = tairhash_zslDelete(zsl, find_node->key_min, find_node->expire_min);
+            assert(ret == 1);
+            find_node = tairhash_zslInsertNode(zsl, slab, new_key_min, new_expire_min);
+        }
     }
     slab_mergeIfNeed(zsl, find_node);  // if need merge
     return;
@@ -268,7 +275,13 @@ void slab_deleteSlabExpire(tairhash_zskiplist *zsl, tairhash_zskiplistNode *zsl_
         }
     }
     slab->num_keys = effective_num;
-    zsl_node->expire_min = slab->expires[min_index], zsl_node->key_min = slab->keys[min_index];
+    long long new_expire_min = slab->expires[min_index];
+    RedisModuleString *new_key_min = slab->keys[min_index];
+    if (new_expire_min != zsl_node->expire_min || RedisModule_StringCompare(new_key_min, zsl_node->key_min) != 0) {
+        int ret = tairhash_zslDelete(zsl, zsl_node->key_min, zsl_node->expire_min);
+        assert(ret == 1);
+        zsl_node = tairhash_zslInsertNode(zsl, slab, new_key_min, new_expire_min);
+    }
     slab_mergeIfNeed(zsl, zsl_node);
     return;
 }

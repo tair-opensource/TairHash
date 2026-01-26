@@ -2084,3 +2084,52 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         }
     }
 }
+
+start_server {tags {"slab_bug_reproduce"}} {
+    test "Test Slab consistency after extensive delete" {
+        r module load $testmodule
+        
+        set key "test_slab_key"
+        # 1. Fill multiple slabs (Slab size is 512)
+        # Insert 1500 items. Should create ~3-4 slabs.
+        for {set i 0} {$i < 1500} {incr i} {
+            r exhset $key field_$i val ex $i
+        }
+        
+        # 2. Delete items from the beginning (Smallest expires/keys)
+        # This forces the First Slab's Min Value to increase repeatedly.
+        # This is where the potential order invariant violation happens.
+        for {set i 0} {$i < 1000} {incr i} {
+            r exhdel $key field_$i
+        }
+        
+        # 3. Verify the remaining items are accessible.
+        # If the First Slab's Min increased but 'leapfrogged' the Second Slab,
+        # the Second Slab might become unreachable or data could be corrupted.
+        for {set i 1000} {$i < 1500} {incr i} {
+            assert_equal [r exhget $key field_$i] "val"
+        }
+        
+        assert_equal [r exhlen $key] 500
+    }
+
+    test "Test Slab Split and Merge random operations" {
+        r del $key
+        # Random operations to trigger split/merge and potential race/logic errors
+        for {set i 0} {$i < 2000} {incr i} {
+            set action [expr {int(rand()*10)}]
+            set f_id [expr {int(rand()*1000)}]
+            set expire [expr {int(rand()*100000)}]
+            
+            if {$action < 7} {
+                # 70% Set
+                r exhset $key f_$f_id val ex $expire
+            } else {
+                # 30% Del
+                r exhdel $key f_$f_id
+            }
+        }
+        # Just ensure it didn't crash
+        r ping
+    }
+}

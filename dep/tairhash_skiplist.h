@@ -6,7 +6,7 @@
 #include "redismodule.h"
 #include "slab.h"
 
-#define TAIRHASH_ZSKIPLIST_MAXLEVEL 64 /* Should be enough for 2^64 elements */
+#define TAIRHASH_ZSKIPLIST_MAXLEVEL 32 /* Should be enough for 2^64 elements */
 #define TAIRHASH_ZSKIPLIST_P 0.25      /* Skiplist P = 1/4 */
 typedef struct tairhash_zskiplistNode {
     Slab *slab;

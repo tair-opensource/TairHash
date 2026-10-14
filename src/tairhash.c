@@ -239,6 +239,10 @@ void activeExpireTimerHandler(RedisModuleCtx *ctx, void *data) {
         goto restart;
     }
 
+    if (RedisModule_AvoidReplicaTraffic()) {
+        goto restart;
+    }
+
     long long start = RedisModule_Milliseconds();
 
     for (int i = 0; i < dbs_per_call; ++i) {
@@ -292,6 +296,10 @@ int fieldExpireIfNeeded(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, t
     }
 
     if (now < when) {
+        return 0;
+    }
+
+    if (RedisModule_AvoidReplicaTraffic()) {
         return 0;
     }
 

@@ -174,6 +174,52 @@ Build options (`cmake -D<option>=ON ../`):
 ```
 ./redis-server --loadmodule /path/to/tairhash_module.so
 ```  
+
+## Module options
+
+Pass options as `name value` pairs after the module path, for example
+`--loadmodule /path/to/tairhash_module.so replication_format compat`.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `enable_active_expire` | 0 or 1 | `1` | Run the active expire timer. Without it fields expire only passively, when accessed. |
+| `active_expire_period` | milliseconds | `1000` | Interval between active expire cycles. |
+| `active_expire_keys_per_loop` | integer | `1000` | Keys (SCAN mode: the SCAN count) examined per database per active expire cycle. |
+| `active_expire_dbs_per_loop` | integer | `16` | Databases visited per active expire cycle. |
+| `passive_expire_keys_per_loop` | integer | `3` | Expired fields removed per passive expiry check. |
+| `replication_format` | `state` or `compat` | `state` | How writes reach replicas and the AOF: `state` sends one internal `EXHMSETREPL` (or `EXHMETAREPL`) per write, `compat` one `EXHSET`/`EXHSETNX` per field, which TairHash 1.x also accepts. See [Upgrading from 1.x](#upgrading-from-1x). On Redis 7.0+ and Valkey it is also the module config `tairhash.replication_format`, which `CONFIG SET` changes at runtime; a value for it in the config file takes precedence over the load argument. |
+
+## Upgrading from 1.x
+
+TairHash 2.0 replicates each write as one `EXHMSETREPL` or `EXHMETAREPL`, which TairHash 1.x
+does not know: a 1.x replica of a 2.0 master logs an error for every write and drops it. A
+write inside a MULTI/EXEC or a script takes the rest of that transaction with it, commands
+on other keys and of other types included: the replica aborts a transaction that holds a
+command it does not know. The RDB encoding is unchanged. Upgrade with
+`replication_format compat` until every node runs 2.0:
+
+1. Start every upgraded node with `replication_format compat` (on Redis 7.0+ and Valkey,
+   `tairhash.replication_format compat` in the config file works too). Upgrade replicas
+   first, fail over, then upgrade the former masters: a 1.x node may then replicate from a
+   2.0 node during the failover, which `compat` keeps working.
+2. Confirm that `MODULE LIST` reports `ver 20000` for `tairhash` on every node, including
+   chained replicas: a replica passes its master's stream on unchanged, so replicas at
+   every depth receive what the top-level master sends.
+3. Switch every node to `state`: `CONFIG SET tairhash.replication_format state` on Redis
+   7.0+ and Valkey, or a restart without the option on older servers.
+
+To downgrade, switch every node back to `compat` first, then run `BGREWRITEAOF` on each
+node so that its AOF holds no `EXHMSETREPL` or `EXHMETAREPL`, and replace the module. A
+node still in `state` writes what it applies from its master to its own AOF in the state
+format. On Redis 7.0+ and Valkey, setting
+`propagation-error-behavior panic-on-replicas` during the upgrade makes a replica that
+cannot apply the stream stop instead of silently diverging.
+
+`EXHSETNX` now starts a new field at version 1, as `EXHSET` does; 1.x left it at 0, so a
+later `VER` check failed for every version but 0. Applied from the replication stream or
+the AOF, `EXHSETNX` still leaves the field at version 0: that is what a 1.x master and the
+`compat` format mean by it. On a server older than Redis 6.0.9 the module cannot tell where
+a command comes from, and the field starts at version 1 there too.
 ## TEST
 
 1. Modify the path in the tairhash.tcl file in the `tests` directory to `set testmodule [file your_path/tairhash_module.so]`

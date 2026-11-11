@@ -244,11 +244,12 @@ void tairHashEnsureExpireIndex(tairHashObj *o) {
 #endif
 }
 
-/* How a field's state is written as a command every TairHash version accepts.
+/* How a field's state is written as a command TairHash 1.x also accepts (the compat format).
  * EXHSET ... ABS <version> [PXAT <expire>] sets value, version and TTL exactly, but
- * cannot set version 0. Only a field that EXHSETNX created and nothing has written since
- * has version 0 (every other write sets or increments the version), so it has no TTL
- * either, and EXHSETNX recreates it exactly. */
+ * cannot set version 0. Only a field that TairHash 1.x created with EXHSETNX and nothing
+ * has written since has version 0 (every other write sets or increments the version), so
+ * it has no TTL either. It is written as EXHSETNX, which 1.x applies at version 0 and so
+ * does this version when the command comes from the replication stream or the AOF. */
 typedef enum {
     FIELD_STATE_EXHSETNX,
     FIELD_STATE_EXHSET,
@@ -270,10 +271,61 @@ typedef struct {
     long long expire;
 } FieldState;
 
+/* How write commands and AOF rewrite propagate field state (replication_format). */
+typedef enum {
+    REPLICATION_FORMAT_STATE,  /* one EXHMSETREPL per write */
+    REPLICATION_FORMAT_COMPAT, /* one EXHSET or EXHSETNX per field, which TairHash 1.x also accepts */
+} ReplicationFormat;
+
+static int g_replication_format = REPLICATION_FORMAT_STATE;
+
+/* EXHMSETREPL <key> <layout> <field> <value> <version> <expire> [...]: the layout names
+ * the per-field arguments, so a replica rejects a layout it does not know instead of
+ * misreading it. Layout 1 is field, value, version, expire. */
+#define FIELD_STATE_LAYOUT 1
+#define FIELD_STATE_ARGS 4
+
+/* Fields per propagated EXHMSETREPL. A write is one command, split only so that a huge one
+ * stays within what a replica accepts (Redis 6.2 and older reject commands of more than
+ * 1048576 arguments); the parts of one write still propagate together, in one MULTI/EXEC. */
+#define FIELD_STATE_FIELDS_PER_CMD 8192
+
+/* EXHMETAREPL <key> <layout> <field> <version> <expire> [...]: the version and expire of
+ * fields whose value a write left alone (the EXHEXPIRE family, EXHPERSIST, EXHSETVER), so
+ * that a TTL refresh does not carry the value. Layout 1 is field, version, expire. */
+#define FIELD_META_LAYOUT 1
+#define FIELD_META_ARGS 3
+
+/* Shared "1" (the layout) and "0" (the expire of a field without a TTL); created at load time. */
+static RedisModuleString *g_layout_str = NULL;
+static RedisModuleString *g_zero_str = NULL;
+
+/* Set at load time when the server reports the REPLICATED and LOADING context flags
+ * (RedisModule_GetContextFlagsAll, Redis 6.0.9+). */
+static int g_can_identify_restoring = 0;
+
+/* Whether the command comes from the replication stream or AOF loading, which carry state
+ * the master already decided, on a server that can tell. */
+static int isRestoringState(RedisModuleCtx *ctx) {
+    if (!g_can_identify_restoring) {
+        return 0;
+    }
+    int flags = RedisModule_GetContextFlags(ctx);
+    return (flags & (REDISMODULE_CTX_FLAGS_REPLICATED | REDISMODULE_CTX_FLAGS_LOADING)) != 0;
+}
+
+/* Whether the caller may restore exact state (EXHMSETREPL): a regular client must not be
+ * able to forge it. A server that cannot report the restoring contexts cannot tell callers
+ * apart, so restoring stays allowed there. */
+static int mayRestoreState(RedisModuleCtx *ctx) {
+    return !g_can_identify_restoring || isRestoringState(ctx);
+}
+
 /* Collects the resulting state of the fields one command writes and propagates it.
  * Propagating state rather than the request makes replicas and the AOF converge
  * regardless of their clock (relative TTLs) and their own state (KEEPTTL, GT/VER checks,
- * version increments). The server wraps the commands of one write in MULTI/EXEC. */
+ * version increments). In the state format a write is one EXHMSETREPL, which costs the
+ * replica one command lookup and argv per write instead of one per field. */
 typedef struct {
     RedisModuleCtx *ctx;
     RedisModuleString *key;
@@ -323,11 +375,47 @@ static void replicateOneFieldState(RedisModuleCtx *ctx, RedisModuleString *key, 
     }
 }
 
+static void replicateFieldStates(RedisModuleCtx *ctx, RedisModuleString *key, const FieldState *fields, int n) {
+    while (n > FIELD_STATE_FIELDS_PER_CMD) {
+        replicateFieldStates(ctx, key, fields, FIELD_STATE_FIELDS_PER_CMD);
+        fields += FIELD_STATE_FIELDS_PER_CMD;
+        n -= FIELD_STATE_FIELDS_PER_CMD;
+    }
+    int argc = 2 + FIELD_STATE_ARGS * n;
+    RedisModuleString **argv = RedisModule_Alloc(sizeof(*argv) * argc);
+    argv[0] = key;
+    argv[1] = g_layout_str;
+    for (int i = 0; i < n; i++) {
+        RedisModuleString **a = argv + 2 + FIELD_STATE_ARGS * i;
+        a[0] = fields[i].field;
+        a[1] = fields[i].value;
+        a[2] = RedisModule_CreateStringFromLongLong(NULL, fields[i].version);
+        a[3] = fields[i].expire ? RedisModule_CreateStringFromLongLong(NULL, fields[i].expire) : g_zero_str;
+    }
+    RedisModule_Replicate(ctx, "EXHMSETREPL", "v", argv, (size_t)argc);
+    for (int i = 0; i < n; i++) {
+        RedisModuleString **a = argv + 2 + FIELD_STATE_ARGS * i;
+        RedisModule_FreeString(NULL, a[2]);
+        if (a[3] != g_zero_str) {
+            RedisModule_FreeString(NULL, a[3]);
+        }
+    }
+    RedisModule_Free(argv);
+}
+
 /* Propagates the collected state, if any, and releases the batch (the key belongs to
  * the caller). */
 static void fieldStateBatchFlush(FieldStateBatch *b) {
+    if (b->len > 0) {
+        if (g_replication_format == REPLICATION_FORMAT_STATE) {
+            replicateFieldStates(b->ctx, b->key, b->fields, b->len);
+        } else {
+            for (int i = 0; i < b->len; i++) {
+                replicateOneFieldState(b->ctx, b->key, &b->fields[i]);
+            }
+        }
+    }
     for (int i = 0; i < b->len; i++) {
-        replicateOneFieldState(b->ctx, b->key, &b->fields[i]);
         RedisModule_FreeString(NULL, b->fields[i].field);
         RedisModule_FreeString(NULL, b->fields[i].value);
     }
@@ -341,6 +429,41 @@ static void replicateFieldState(RedisModuleCtx *ctx, RedisModuleString *key, Red
     fieldStateBatchInit(&batch, ctx, key, 1);
     fieldStateBatchAdd(&batch, name, value, f);
     fieldStateBatchFlush(&batch);
+}
+
+/* Propagates the version and expire of field f after a write that left its value alone. The
+ * compat format has no command for that and sends the value as well. */
+static void replicateFieldMeta(RedisModuleCtx *ctx, RedisModuleString *key, RedisModuleString *name, const TairHashField *f) {
+    if (g_replication_format != REPLICATION_FORMAT_STATE) {
+        replicateFieldState(ctx, key, name, fieldValueString(ctx, f), f);
+        return;
+    }
+    RedisModule_Replicate(ctx, "EXHMETAREPL", "slsll", key, (long long)FIELD_META_LAYOUT, name, f->version, f->expire);
+}
+
+/* Sets the expire of field f (0 for none) and keeps the expire indexes in step, leaving them
+ * alone when the expire does not change. */
+static void setFieldExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *name, TairHashField *f,
+                           long long expire) {
+    if (f->expire == expire) {
+        return;
+    }
+    if (f->expire == 0) {
+        g_expire_algorithm.insert(ctx, dbid, key, o, name, expire);
+    } else if (expire == 0) {
+        g_expire_algorithm.delete(ctx, dbid, key, o, name, f->expire);
+    } else {
+        g_expire_algorithm.update(ctx, dbid, key, o, name, f->expire, expire);
+    }
+    ftSetExpire(&o->hash, f, expire);
+}
+
+/* A state command from the replication stream or the AOF that is rejected drops the write it
+ * carries, and nobody reads the error reply there, so the rejection is logged too. */
+static int rejectStateCommand(RedisModuleCtx *ctx, const char *command, const char *err) {
+    RedisModule_Log(ctx, "warning", "%s rejected, the write it carries is lost: %s", command, err);
+    RedisModule_ReplyWithError(ctx, err);
+    return REDISMODULE_ERR;
 }
 
 /* What field expiry may do for the command or the timer that runs in ctx. */
@@ -946,7 +1069,7 @@ int tairHashExpireGenericFunc(RedisModuleCtx *ctx, RedisModuleString **argv, int
         /* The resulting expire and version, not EXHPEXPIREAT: a node that judges the field by its
          * own clock (TairHash 1.x, or a server that does not say where a command comes from) would
          * drop the write once the field's previous TTL had passed. */
-        replicateFieldState(ctx, argv[1], argv[2], fieldValueString(ctx, tair_hash_val), tair_hash_val);
+        replicateFieldMeta(ctx, argv[1], argv[2], tair_hash_val);
     }
 
     delEmptyTairHashIfNeeded(ctx, key, pkey, tair_hash_obj);
@@ -1259,6 +1382,10 @@ int TairHashTypeHsetNx_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **arg
     }
 
     TairHashField *tair_hash_val = fieldInsert(tair_hash_obj, skey, svalue);
+    /* A new field starts at version 1, as with EXHSET; version 0 means "no version". From the
+     * replication stream or the AOF the command states a field at version 0 instead: TairHash
+     * 1.x and the compat format have no other way to write one. */
+    tair_hash_val->version = isRestoringState(ctx) ? 0 : 1;
 
     replicateFieldState(ctx, pkey, skey, svalue, tair_hash_val);
     RedisModule_ReplyWithLongLong(ctx, 1);
@@ -1498,7 +1625,7 @@ int TairHashTypeHpersist_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **a
         int dbid = RedisModule_GetSelectedDb(ctx);
         g_expire_algorithm.delete(ctx, dbid, argv[1], tair_hash_obj, argv[2], tair_hash_val->expire);
         ftSetExpire(&tair_hash_obj->hash, tair_hash_val, 0);
-        replicateFieldState(ctx, argv[1], argv[2], fieldValueString(ctx, tair_hash_val), tair_hash_val);
+        replicateFieldMeta(ctx, argv[1], argv[2], tair_hash_val);
         RedisModule_ReplyWithLongLong(ctx, 1);
     }
 
@@ -1608,7 +1735,7 @@ int TairHashTypeHsetVer_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
 
     tair_hash_val->version = version;
     RedisModule_ReplyWithLongLong(ctx, 1);
-    replicateFieldState(ctx, argv[1], argv[2], fieldValueString(ctx, tair_hash_val), tair_hash_val);
+    replicateFieldMeta(ctx, argv[1], argv[2], tair_hash_val);
     return REDISMODULE_OK;
 }
 
@@ -2940,10 +3067,157 @@ int TairHashTypeActiveExpireInfo_RedisCommand(RedisModuleCtx *ctx, RedisModuleSt
     return REDISMODULE_OK;
 }
 
+/* Returns the tairhash at an open key, creating it when the key is empty, or NULL
+ * (after replying WRONGTYPE) when the key holds another type. */
+static tairHashObj *getOrCreateTairHash(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *keyname) {
+    if (RedisModule_KeyType(key) == REDISMODULE_KEYTYPE_EMPTY) {
+        tairHashObj *o = createTairHashTypeObject();
+        o->key = RedisModule_CreateStringFromString(NULL, keyname);
+        RedisModule_ModuleTypeSetValue(key, TairHashType, o);
+        return o;
+    }
+    if (RedisModule_ModuleTypeGetType(key) != TairHashType) {
+        RedisModule_ReplyWithError(ctx, REDISMODULE_ERRORMSG_WRONGTYPE);
+        return NULL;
+    }
+    return RedisModule_ModuleTypeGetValue(key);
+}
+
+/* EXHMSETREPL <key> <layout> <field> <value> <version> <expire> [...]
+ *
+ * Internal: sets each field to exactly the given state (expire is an absolute unix time
+ * in milliseconds, 0 for none), creating the hash if needed. Emitted by write commands
+ * and AOF rewrite in the state replication format; rejected from regular clients.
+ * Version 0 is accepted: fields written before EXHSETNX started at version 1 carry it. */
+int TairHashTypeHmsetRepl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    RedisModule_AutoMemory(ctx);
+
+    if (argc < 3 + FIELD_STATE_ARGS || (argc - 3) % FIELD_STATE_ARGS != 0) {
+        return RedisModule_WrongArity(ctx);
+    }
+    if (!mayRestoreState(ctx)) {
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_CMD);
+        return REDISMODULE_ERR;
+    }
+    long long layout;
+    if (RedisModule_StringToLongLong(argv[2], &layout) != REDISMODULE_OK || layout != FIELD_STATE_LAYOUT) {
+        return rejectStateCommand(ctx, "EXHMSETREPL", TAIRHASH_ERRORMSG_REPL_LAYOUT);
+    }
+
+    /* The master decided these values; they are restored as they are. No write leaves a
+     * negative version or expire, and the expire indexes and EXHVER's replies rely on that. */
+    long long version, expire;
+    for (int i = 3; i < argc; i += FIELD_STATE_ARGS) {
+        if (RedisModule_StringToLongLong(argv[i + 2], &version) != REDISMODULE_OK || RedisModule_StringToLongLong(argv[i + 3], &expire) != REDISMODULE_OK ||
+            version < 0 || expire < 0) {
+            return rejectStateCommand(ctx, "EXHMSETREPL", TAIRHASH_ERRORMSG_SYNTAX);
+        }
+    }
+    if (!fieldArgsFit(ctx, argv, 3, argc, FIELD_STATE_ARGS, 1)) {
+        RedisModule_Log(ctx, "warning", "EXHMSETREPL rejected, the write it carries is lost: %s", TAIRHASH_ERRORMSG_FIELD_TOO_LONG);
+        return REDISMODULE_ERR;
+    }
+
+    RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
+    tairHashObj *o = getOrCreateTairHash(ctx, key, argv[1]);
+    if (o == NULL) {
+        RedisModule_Log(ctx, "warning", "EXHMSETREPL rejected, the write it carries is lost: %s", REDISMODULE_ERRORMSG_WRONGTYPE);
+        return REDISMODULE_ERR;
+    }
+
+    int dbid = RedisModule_GetSelectedDb(ctx);
+    for (int i = 3; i < argc; i += FIELD_STATE_ARGS) {
+        RedisModuleString *field = argv[i];
+        RedisModule_StringToLongLong(argv[i + 2], &version);
+        RedisModule_StringToLongLong(argv[i + 3], &expire);
+
+        TairHashField *f = fieldLookup(o, field);
+        if (f != NULL) {
+            f = fieldSetValue(o, f, argv[i + 1]);
+        } else {
+            f = fieldInsert(o, field, argv[i + 1]);
+        }
+        f->version = version;
+        setFieldExpire(ctx, dbid, argv[1], o, field, f, expire);
+    }
+
+    RedisModule_ReplicateVerbatim(ctx);
+    RedisModule_ReplyWithSimpleString(ctx, "OK");
+    return REDISMODULE_OK;
+}
+
+/* EXHMETAREPL <key> <layout> <field> <version> <expire> [...]
+ *
+ * Internal: sets the version and expire (an absolute unix time in milliseconds, 0 for none) of
+ * existing fields to what a write that left their values alone decided. Emitted by the
+ * EXHEXPIRE family, EXHPERSIST and EXHSETVER in the state replication format; rejected from
+ * regular clients. A field that does not exist is an error: a node holds every field its
+ * master or its AOF goes on to update. */
+int TairHashTypeHmetaRepl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    RedisModule_AutoMemory(ctx);
+
+    if (argc < 3 + FIELD_META_ARGS || (argc - 3) % FIELD_META_ARGS != 0) {
+        return RedisModule_WrongArity(ctx);
+    }
+    if (!mayRestoreState(ctx)) {
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_CMD);
+        return REDISMODULE_ERR;
+    }
+    long long layout, version, expire;
+    if (RedisModule_StringToLongLong(argv[2], &layout) != REDISMODULE_OK || layout != FIELD_META_LAYOUT) {
+        return rejectStateCommand(ctx, "EXHMETAREPL", TAIRHASH_ERRORMSG_REPL_LAYOUT);
+    }
+    for (int i = 3; i < argc; i += FIELD_META_ARGS) {
+        if (RedisModule_StringToLongLong(argv[i + 1], &version) != REDISMODULE_OK || RedisModule_StringToLongLong(argv[i + 2], &expire) != REDISMODULE_OK ||
+            version < 0 || expire < 0) {
+            return rejectStateCommand(ctx, "EXHMETAREPL", TAIRHASH_ERRORMSG_SYNTAX);
+        }
+    }
+
+    RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
+    int type = RedisModule_KeyType(key);
+    if (type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(key) != TairHashType) {
+        return rejectStateCommand(ctx, "EXHMETAREPL", REDISMODULE_ERRORMSG_WRONGTYPE);
+    }
+
+    int missing = 0;
+    if (type != REDISMODULE_KEYTYPE_EMPTY) {
+        tairHashObj *o = RedisModule_ModuleTypeGetValue(key);
+        int dbid = RedisModule_GetSelectedDb(ctx);
+        for (int i = 3; i < argc; i += FIELD_META_ARGS) {
+            TairHashField *f = fieldLookup(o, argv[i]);
+            if (f == NULL) {
+                missing++;
+                continue;
+            }
+            RedisModule_StringToLongLong(argv[i + 1], &version);
+            RedisModule_StringToLongLong(argv[i + 2], &expire);
+            f->version = version;
+            setFieldExpire(ctx, dbid, argv[1], o, argv[i], f, expire);
+        }
+    } else {
+        missing = (argc - 3) / FIELD_META_ARGS;
+    }
+    RedisModule_ReplicateVerbatim(ctx);
+    /* The master changed fields this node does not have: the two have diverged. The error reply
+     * hands that to the server, which counts it and stops the node if it is configured to
+     * (propagation-error-behavior); the fields that do exist are updated all the same. */
+    if (missing) {
+        RedisModule_Log(ctx, "warning", "EXHMETAREPL: %d of the fields it updates do not exist on this node", missing);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_REPL_NO_FIELD);
+        return REDISMODULE_ERR;
+    }
+    RedisModule_ReplyWithSimpleString(ctx, "OK");
+    return REDISMODULE_OK;
+}
+
 /* ========================== "tairhashtype" type methods ======================= */
 
 void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
-    REDISMODULE_NOT_USED(encver);
+    if (encver > TAIRHASH_ENCVER) {
+        RedisModule_LogIOError(rdb, "warning", "tairhash: unsupported encoding version %d (this module reads up to %d)", encver, TAIRHASH_ENCVER);
+        return NULL;
+    }
 
     tairHashObj *o = createTairHashTypeObject();
     uint64_t len = RedisModule_LoadUnsigned(rdb);
@@ -3017,8 +3291,54 @@ void TairHashTypeRdbSave(RedisModuleIO *rdb, void *value) {
     ftIterRelease(&it);
 }
 
-void TairHashTypeAofRewrite(RedisModuleIO *aof, RedisModuleString *key, void *value) {
-    tairHashObj *o = (tairHashObj *)value;
+/* Fields per EXHMSETREPL emitted by AOF rewrite in the state format: one command per
+ * field made the AOF large and its replay slow, an unbounded one would make a huge hash a
+ * huge command. */
+#define AOF_REWRITE_FIELDS_PER_CMD 64
+
+/* Emits one EXHMSETREPL and frees the field arguments (argv[0] and argv[1] are the caller's). */
+static void emitFieldStates(RedisModuleIO *aof, RedisModuleString **argv, int argc) {
+    RedisModule_EmitAOF(aof, "EXHMSETREPL", "v", argv, (size_t)argc);
+    for (int i = 2; i < argc; i++) {
+        if (argv[i] != g_zero_str) {
+            RedisModule_FreeString(NULL, argv[i]);
+        }
+    }
+}
+
+static void aofRewriteState(RedisModuleIO *aof, RedisModuleString *key, tairHashObj *o) {
+    RedisModuleString *argv[2 + FIELD_STATE_ARGS * AOF_REWRITE_FIELDS_PER_CMD];
+    int argc = 2;
+    /* The server passes a stack-allocated key, which the "v" format would try to retain. */
+    argv[0] = RedisModule_CreateStringFromString(NULL, key);
+    argv[1] = g_layout_str;
+
+    fieldTableIterator it;
+    TairHashField *f;
+    long long now = RedisModule_Milliseconds();
+    ftIterInitReadOnly(&it, &o->hash);
+    while ((f = ftIterNext(&it)) != NULL) {
+        if (f->expire && now > f->expire) {
+            /* For expired field, we do not REWRITE it. */
+            continue;
+        }
+        argv[argc++] = RedisModule_CreateString(NULL, fieldName(f), f->name_len);
+        argv[argc++] = RedisModule_CreateString(NULL, fieldValue(f), f->value_len);
+        argv[argc++] = RedisModule_CreateStringFromLongLong(NULL, f->version);
+        argv[argc++] = f->expire ? RedisModule_CreateStringFromLongLong(NULL, f->expire) : g_zero_str;
+        if (argc == (int)(sizeof(argv) / sizeof(argv[0]))) {
+            emitFieldStates(aof, argv, argc);
+            argc = 2;
+        }
+    }
+    ftIterRelease(&it);
+    if (argc > 2) {
+        emitFieldStates(aof, argv, argc);
+    }
+    RedisModule_FreeString(NULL, argv[0]);
+}
+
+static void aofRewriteCompat(RedisModuleIO *aof, RedisModuleString *key, tairHashObj *o) {
     fieldTableIterator it;
     TairHashField *f;
     long long now = RedisModule_Milliseconds();
@@ -3042,6 +3362,14 @@ void TairHashTypeAofRewrite(RedisModuleIO *aof, RedisModuleString *key, void *va
         }
     }
     ftIterRelease(&it);
+}
+
+void TairHashTypeAofRewrite(RedisModuleIO *aof, RedisModuleString *key, void *value) {
+    if (g_replication_format == REPLICATION_FORMAT_STATE) {
+        aofRewriteState(aof, key, value);
+    } else {
+        aofRewriteCompat(aof, key, value);
+    }
 }
 
 void TairHashTypeFree(void *value) {
@@ -3220,6 +3548,8 @@ int Module_CreateCommands(RedisModuleCtx *ctx) {
     CREATE_WRCMD("exhpexpire", TairHashTypeHpexpire_RedisCommand)
     CREATE_WRCMD("exhpexpireat", TairHashTypeHpexpireAt_RedisCommand)
     CREATE_WRCMD("exhpersist", TairHashTypeHpersist_RedisCommand)
+    CREATE_WRCMD("exhmsetrepl", TairHashTypeHmsetRepl_RedisCommand)
+    CREATE_WRCMD("exhmetarepl", TairHashTypeHmetaRepl_RedisCommand)
 
     /* readonly cmds */
     CREATE_ROCMD("exhget", TairHashTypeHget_RedisCommand)
@@ -3265,11 +3595,66 @@ static int serverDbCount(void) {
     return lo;
 }
 
+/* Module configs (Redis 7.0+) are resolved at load time: the vendored redismodule.h predates them. */
+typedef int (*ConfigGetEnumFunc)(const char *name, void *privdata);
+typedef int (*ConfigSetEnumFunc)(const char *name, int val, void *privdata, RedisModuleString **err);
+typedef int (*ConfigApplyFunc)(RedisModuleCtx *ctx, void *privdata, RedisModuleString **err);
+typedef int (*RegisterEnumConfigFunc)(RedisModuleCtx *ctx, const char *name, int default_val, unsigned int flags, const char **enum_values,
+                                      const int *int_values, int num_enum_vals, ConfigGetEnumFunc getfn, ConfigSetEnumFunc setfn,
+                                      ConfigApplyFunc applyfn, void *privdata);
+typedef int (*LoadConfigsFunc)(RedisModuleCtx *ctx);
+
+static const char *g_replication_format_names[] = {"state", "compat"};
+static const int g_replication_format_values[] = {REPLICATION_FORMAT_STATE, REPLICATION_FORMAT_COMPAT};
+
+static int parseReplicationFormat(RedisModuleString *arg, int *format) {
+    for (size_t i = 0; i < sizeof(g_replication_format_names) / sizeof(g_replication_format_names[0]); i++) {
+        if (!mstrcasecmp(arg, g_replication_format_names[i])) {
+            *format = g_replication_format_values[i];
+            return REDISMODULE_OK;
+        }
+    }
+    return REDISMODULE_ERR;
+}
+
+static int getReplicationFormat(const char *name, void *privdata) {
+    REDISMODULE_NOT_USED(name);
+    REDISMODULE_NOT_USED(privdata);
+    return g_replication_format;
+}
+
+static int setReplicationFormat(const char *name, int val, void *privdata, RedisModuleString **err) {
+    REDISMODULE_NOT_USED(name);
+    REDISMODULE_NOT_USED(privdata);
+    REDISMODULE_NOT_USED(err);
+    g_replication_format = val;
+    return REDISMODULE_OK;
+}
+
+/* On Redis 7.0+ (and Valkey) replication_format is also a module config,
+ * tairhash.replication_format, so CONFIG SET can switch it at runtime: a rolling upgrade
+ * from 1.x runs in compat until every node runs 2.x, then switches to state. */
+static int registerReplicationFormatConfig(RedisModuleCtx *ctx) {
+    RegisterEnumConfigFunc register_enum_config = NULL;
+    LoadConfigsFunc load_configs = NULL;
+    if (RedisModule_GetApi("RedisModule_RegisterEnumConfig", (void **)&register_enum_config) != REDISMODULE_OK || register_enum_config == NULL ||
+        RedisModule_GetApi("RedisModule_LoadConfigs", (void **)&load_configs) != REDISMODULE_OK || load_configs == NULL) {
+        return REDISMODULE_OK;
+    }
+    if (register_enum_config(ctx, "replication_format", g_replication_format, 0, g_replication_format_names, g_replication_format_values,
+                             (int)(sizeof(g_replication_format_names) / sizeof(g_replication_format_names[0])), getReplicationFormat,
+                             setReplicationFormat, NULL, NULL) != REDISMODULE_OK) {
+        RedisModule_Log(ctx, "warning", "Failed to register the replication_format config");
+        return REDISMODULE_ERR;
+    }
+    return load_configs(ctx);
+}
+
 int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     REDISMODULE_NOT_USED(argv);
     REDISMODULE_NOT_USED(argc);
 
-    if (RedisModule_Init(ctx, "tairhash", 1, REDISMODULE_APIVER_1) == REDISMODULE_ERR)
+    if (RedisModule_Init(ctx, "tairhash", TAIRHASH_MODULE_VERSION, REDISMODULE_APIVER_1) == REDISMODULE_ERR)
         return REDISMODULE_ERR;
 
     if (argc % 2) {
@@ -3333,6 +3718,11 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
                 return REDISMODULE_ERR;
             }
             g_expire_algorithm.keys_per_passive_loop = v;
+        } else if (!mstrcasecmp(argv[ii], "replication_format")) {
+            if (parseReplicationFormat(argv[ii + 1], &g_replication_format) != REDISMODULE_OK) {
+                RedisModule_Log(ctx, "warning", "Invalid argument for replication_format: expected state or compat");
+                return REDISMODULE_ERR;
+            }
         } else {
             RedisModule_Log(ctx, "warning", "Unrecognized option");
             return REDISMODULE_ERR;
@@ -3357,13 +3747,25 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
 #endif
     };
 
-    TairHashType = RedisModule_CreateDataType(ctx, "tairhash-", 0, &tm);
+    TairHashType = RedisModule_CreateDataType(ctx, "tairhash-", TAIRHASH_ENCVER, &tm);
     if (TairHashType == NULL)
         return REDISMODULE_ERR;
 
     ftModuleInit();
     if (RedisModule_GetApi("RedisModule_MallocSizeString", (void **)&g_malloc_size_string) != REDISMODULE_OK) {
         g_malloc_size_string = NULL;
+    }
+    g_layout_str = RedisModule_CreateStringFromLongLong(NULL, FIELD_STATE_LAYOUT);
+    g_zero_str = RedisModule_CreateString(NULL, "0", 1);
+
+    int (*get_context_flags_all)(void) = NULL;
+    if (RedisModule_GetApi("RedisModule_GetContextFlagsAll", (void **)&get_context_flags_all) == REDISMODULE_OK && get_context_flags_all) {
+        int restoring_flags = REDISMODULE_CTX_FLAGS_REPLICATED | REDISMODULE_CTX_FLAGS_LOADING;
+        g_can_identify_restoring = (get_context_flags_all() & restoring_flags) == restoring_flags;
+    }
+
+    if (registerReplicationFormatConfig(ctx) != REDISMODULE_OK) {
+        return REDISMODULE_ERR;
     }
 
     if (REDISMODULE_ERR == Module_CreateCommands(ctx)) {

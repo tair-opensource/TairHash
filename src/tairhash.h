@@ -26,8 +26,17 @@
 #include "slabapi.h"
 #include "util.h"
 
+/* Reported to the server (MODULE LIST, INFO modules) as major * 10000 + minor * 100 + patch. */
+#define TAIRHASH_MODULE_VERSION 20000
+
+/* Encoding version of the RDB format; RDB load rejects newer encodings. */
+#define TAIRHASH_ENCVER 0
+
 #define TAIRHASH_ERRORMSG_SYNTAX "ERR syntax error"
 #define TAIRHASH_ERRORMSG_VERSION "ERR update version is stale"
+#define TAIRHASH_ERRORMSG_INTERNAL_CMD "ERR only accepted from the replication stream or while loading"
+#define TAIRHASH_ERRORMSG_REPL_LAYOUT "ERR unknown replication layout: upgrade this node to the master's TairHash version"
+#define TAIRHASH_ERRORMSG_REPL_NO_FIELD "ERR the field to update does not exist: this node has diverged from its master"
 #define TAIRHASH_ERRORMSG_NOT_INTEGER "ERR value is not an integer"
 #define TAIRHASH_ERRORMSG_NOT_FLOAT "ERR value is not an float"
 #define TAIRHASH_ERRORMSG_OVERFLOW "ERR increment or decrement would overflow"

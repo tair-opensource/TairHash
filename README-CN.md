@@ -162,6 +162,32 @@ cmake ../ && make -j
 | `SANITIZER_MODE` | 未设置 | `address`、`undefined` 或 `thread` |
 | `GCOV_MODE` | `OFF` | 覆盖率插桩 |
 
+## 模块参数
+
+在模块路径后以 `name value` 的形式传入参数，例如
+`--loadmodule /path/to/tairhash_module.so replication_format compat`。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `enable_active_expire` | 0或1 | `1` | 是否运行主动过期定时器。关闭后field只会在访问时被动过期。 |
+| `active_expire_period` | 毫秒 | `1000` | 主动过期的执行间隔。 |
+| `active_expire_keys_per_loop` | 整数 | `1000` | 每次主动过期在每个数据库中检查的key数量（SCAN模式下为SCAN的count）。 |
+| `active_expire_dbs_per_loop` | 整数 | `16` | 每次主动过期访问的数据库数量。 |
+| `passive_expire_keys_per_loop` | 整数 | `3` | 每次被动过期检查最多删除的过期field数量。 |
+| `replication_format` | `state` 或 `compat` | `state` | 写入如何传给从节点和AOF：`state` 每次写入发送一条内部命令 `EXHMSETREPL`（或 `EXHMETAREPL`），`compat` 每个field发送一条 `EXHSET`/`EXHSETNX`，TairHash 1.x也能识别。见[从1.x升级](#从1x升级)。在Redis 7.0+和Valkey上它同时是模块配置 `tairhash.replication_format`，可以通过 `CONFIG SET` 在运行时修改；配置文件中的值优先于加载参数。 |
+
+## 从1.x升级
+
+TairHash 2.0把每次写入复制为一条 `EXHMSETREPL` 或 `EXHMETAREPL`，TairHash 1.x不认识这些命令：2.0主节点的1.x从节点会对每次写入记录错误并丢弃该写入。位于MULTI/EXEC或脚本中的写入会连同该事务的其余部分（包括针对其他key和其他类型的命令）一起被丢弃：从节点会中止包含未知命令的事务。RDB编码不变。在所有节点都运行2.0之前，请使用 `replication_format compat`：
+
+1. 所有升级后的节点都以 `replication_format compat` 启动（在Redis 7.0+和Valkey上，也可以在配置文件中写 `tairhash.replication_format compat`）。先升级从节点，进行故障转移，再升级原主节点：故障转移期间1.x节点可能会从2.0节点复制，`compat` 可以保证其正常工作。
+2. 确认每个节点（包括级联的从节点）的 `MODULE LIST` 中 `tairhash` 的 `ver` 为 `20000`：从节点会原样转发其主节点的复制流，因此任意层级的从节点收到的都是顶层主节点发送的内容。
+3. 将所有节点切换为 `state`：在Redis 7.0+和Valkey上执行 `CONFIG SET tairhash.replication_format state`，更早的版本去掉该参数后重启。
+
+降级时，先将所有节点切换回 `compat`，再在每个节点上执行 `BGREWRITEAOF` 使其AOF中不再包含 `EXHMSETREPL` 或 `EXHMETAREPL`，然后替换模块。仍处于 `state` 的节点会把从主节点应用的写入以state格式写入自己的AOF。在Redis 7.0+和Valkey上，升级期间设置 `propagation-error-behavior panic-on-replicas` 可以让无法应用复制流的从节点直接停止，而不是静默地产生数据不一致。
+
+`EXHSETNX` 现在与 `EXHSET` 一样，新field的版本从1开始；1.x中为0，导致之后的 `VER` 检查除0以外对任何版本都会失败。来自复制流或AOF的 `EXHSETNX` 仍然把field的版本置为0：这正是1.x主节点和 `compat` 格式用它表达的含义。在早于Redis 6.0.9的服务端上，模块无法判断命令的来源，此时版本同样从1开始。
+
 ## 测试方法
 
 1. 修改`tests`目录下tairhash.tcl文件中的路径为`set testmodule [file your_path/tairhash_module.so]`

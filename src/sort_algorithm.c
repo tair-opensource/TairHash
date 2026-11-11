@@ -33,7 +33,7 @@ void insert(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
         if (before_min_score > 0) {
             m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score);
         } else {
-            m_zslInsert(g_expire_index[dbid], after_min_score, takeAndRef(o->key));
+            m_zslInsert(g_expire_index[dbid], after_min_score, expireIndexMember(o));
         }
     }
 }
@@ -103,7 +103,9 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
             break;
         }
         start_index++;
+        /* The list takes over the index's copy of the key name, so the range delete frees only the nodes. */
         m_listAddNodeTail(keys, key);
+        ln->member = NULL;
         ln = ln->level[0].forward;
     }
 
@@ -128,6 +130,7 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
             Module_Assert(RedisModule_ModuleTypeGetType(real_key) == TairHashType);
         } else {
             /* Note: redis scan may return dup key. */
+            RedisModule_FreeString(NULL, key);
             m_listDelNode(keys, node);
             continue;
         }
@@ -151,14 +154,17 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
             ln2 = ln2->level[0].forward;
         }
 
+        int deleted = 0;
         if (start_index) {
             m_zslDeleteRangeByRank(tair_hash_obj->expire_index, 1, start_index);
-            delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj);
+            deleted = delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj);
         }
 
-        /* If there is still a field waiting to expire and delete, re-insert it to the global index. */
-        if (ln2) {
-            m_zslInsert(g_expire_index[dbid], ln2->score, takeAndRef(tair_hash_obj->key));
+        /* If there is still a field waiting to expire, hand the key name back to the global index. */
+        if (!deleted && ln2) {
+            m_zslInsert(g_expire_index[dbid], ln2->score, key);
+        } else {
+            RedisModule_FreeString(NULL, key);
         }
 
         m_listDelNode(keys, node);
@@ -200,7 +206,9 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *up_key) {
             break;
         }
         start_index++;
+        /* The list takes over the index's copy of the key name, so the range delete frees only the nodes. */
         m_listAddNodeTail(keys, key);
+        ln->member = NULL;
         ln = ln->level[0].forward;
     }
 
@@ -241,15 +249,20 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *up_key) {
             ln = ln->level[0].forward;
         }
 
+        int deleted = 0;
         if (start_index) {
             m_zslDeleteRangeByRank(tair_hash_obj->expire_index, 1, start_index);
-            if (!delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj)) {
+            deleted = delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj);
+            if (!deleted) {
                 RedisModule_CloseKey(real_key);
             }
         }
 
-        if (ln) {
-            m_zslInsert(g_expire_index[dbid], ln->score, takeAndRef(tair_hash_obj->key));
+        /* If there is still a field waiting to expire, hand the key name back to the global index. */
+        if (!deleted && ln) {
+            m_zslInsert(g_expire_index[dbid], ln->score, key);
+        } else {
+            RedisModule_FreeString(NULL, key);
         }
 
         m_listDelNode(keys, node);

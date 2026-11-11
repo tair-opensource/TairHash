@@ -75,6 +75,13 @@ RedisModuleString *takeAndRef(RedisModuleString *str) {
     return str;
 }
 
+/* Members of g_expire_index are the index's own copies of key names, never a retained obj->key.
+ * The server may free a TairHash, and with it obj->key, on a lazyfree thread, while the index is
+ * used from the main thread; sharing the refcounted string between them races on its refcount. */
+RedisModuleString *expireIndexMember(const tairHashObj *obj) {
+    return RedisModule_CreateStringFromString(NULL, obj->key);
+}
+
 int isExpire(long long when) {
     if (when == 0) return 0;
     return RedisModule_Milliseconds() > when;
@@ -84,6 +91,8 @@ int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModu
     if (!obj || (RedisModule_GetContextFlags(ctx) & REDISMODULE_CTX_FLAGS_SLAVE) || (dictSize(obj->hash) != 0)) {
         return 0;
     }
+    /* raw_key is still used after the key is deleted, so it must not be owned by obj. */
+    Module_Assert(raw_key != obj->key);
 
     if (key == NULL) {
         key = RedisModule_OpenKey(ctx, raw_key, REDISMODULE_WRITE);
@@ -415,7 +424,7 @@ static int keySpaceNotification(RedisModuleCtx *ctx, int type, const char *event
                 tair_hash_obj->key = RedisModule_CreateStringFromString(NULL, local_to_key);
             }
             if (indexed) {
-                m_zslInsert(g_expire_index[local_to_dbid], previous_index, takeAndRef(tair_hash_obj->key));
+                m_zslInsert(g_expire_index[local_to_dbid], previous_index, expireIndexMember(tair_hash_obj));
             }
         }
 

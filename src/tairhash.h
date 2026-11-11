@@ -103,6 +103,7 @@ typedef struct ExpireAlgorithm {
 
 void _moduleAssert(const char *estr, const char *file, int line);
 RedisModuleString *takeAndRef(RedisModuleString *str);
+RedisModuleString *expireIndexMember(const tairHashObj *obj);
 int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *raw_key, tairHashObj *obj);
 void notifyFieldSpaceEvent(char *event, RedisModuleString *key, RedisModuleString *field, int dbid);
 int isExpire(long long when);

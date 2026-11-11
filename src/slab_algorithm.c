@@ -35,7 +35,7 @@ void insert(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
         if (before_min_score > 0) {
             m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score);
         } else {
-            m_zslInsert(g_expire_index[dbid], after_min_score, takeAndRef(o->key));
+            m_zslInsert(g_expire_index[dbid], after_min_score, expireIndexMember(o));
         }
     }
 }
@@ -105,7 +105,9 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
             break;
         }
         start_index++;
+        /* The list takes over the index's copy of the key name, so the range delete frees only the nodes. */
         m_listAddNodeTail(keys, key);
+        ln->member = NULL;
         ln = ln->level[0].forward;
     }
 
@@ -130,6 +132,7 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
         if (type != REDISMODULE_KEYTYPE_EMPTY) {
             Module_Assert(RedisModule_ModuleTypeGetType(real_key) == TairHashType);
         } else {
+            RedisModule_FreeString(NULL, key);
             m_listDelNode(keys, node);
             continue;
         }
@@ -179,11 +182,14 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
             slab_deleteSlabExpire(tair_hash_obj->expire_index, tair_hash_obj->expire_index->header->level[0].forward, ontime_indices, ontime_num);
         }
 
-        if (tair_hash_obj->expire_index->length > 0 && start_index) {
-            m_zslInsert(g_expire_index[dbid], tair_hash_obj->expire_index->header->level[0].forward->expire_min, takeAndRef(tair_hash_obj->key));
-        }
-        if (start_index) {
-            delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj);
+        int deleted = start_index ? delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj) : 0;
+
+        /* The key left the global index above; hand its name back whenever fields remain to expire,
+         * including when the per-loop budget ran out before any of them were processed. */
+        if (!deleted && tair_hash_obj->expire_index->length > 0) {
+            m_zslInsert(g_expire_index[dbid], tair_hash_obj->expire_index->header->level[0].forward->expire_min, key);
+        } else {
+            RedisModule_FreeString(NULL, key);
         }
 
         m_listDelNode(keys, node);

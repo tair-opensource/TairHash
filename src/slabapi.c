@@ -28,7 +28,20 @@
 
 #define RELAXATION 10
 #ifdef __AVX2__
-__m256i shuffle_timeout_mask_4x64[16], shuffle_ontime_mask_4x64[16];
+/* Indexed by a 4-bit "expire > now" lane mask: the lanes that are still on time / already timed out,
+ * in ascending order, padded with -1. */
+static const int32_t shuffle_ontime_lanes[16][4] __attribute__((aligned(16))) = {
+    {-1, -1, -1, -1}, {0, -1, -1, -1}, {1, -1, -1, -1}, {0, 1, -1, -1},
+    {2, -1, -1, -1},  {0, 2, -1, -1},  {1, 2, -1, -1},  {0, 1, 2, -1},
+    {3, -1, -1, -1},  {0, 3, -1, -1},  {1, 3, -1, -1},  {0, 1, 3, -1},
+    {2, 3, -1, -1},   {0, 2, 3, -1},   {1, 2, 3, -1},   {0, 1, 2, 3},
+};
+static const int32_t shuffle_timeout_lanes[16][4] __attribute__((aligned(16))) = {
+    {0, 1, 2, 3},     {1, 2, 3, -1},   {0, 2, 3, -1},   {2, 3, -1, -1},
+    {0, 1, 3, -1},    {1, 3, -1, -1},  {0, 3, -1, -1},  {3, -1, -1, -1},
+    {0, 1, 2, -1},    {1, 2, -1, -1},  {0, 2, -1, -1},  {2, -1, -1, -1},
+    {0, 1, -1, -1},   {1, -1, -1, -1}, {0, -1, -1, -1}, {-1, -1, -1, -1},
+};
 #endif
 
 int partition(Slab *slab, int low, int high) {
@@ -319,73 +332,30 @@ int slab_getSlabTimeoutExpireIndex(tairhash_zskiplistNode *node, int *ontime_ind
         __m256i v_b_gt = _mm256_cmpgt_epi64(v_b, target_expire_vec);
         int v_a_gt_mask = _mm256_movemask_pd((__m256d)v_a_gt);
         int v_b_gt_mask = _mm256_movemask_pd((__m256d)v_b_gt);
-        __m256i v_a_cur_i = _mm256_set1_epi64x(i);
-        __m256i v_b_cur_i = _mm256_set1_epi64x(i + width);
+        /* The expire comparison runs on 64-bit lanes, but the index arrays hold ints, so offsets are
+         * built and stored as 4 x int32. */
+        __m128i v_a_cur_i = _mm_set1_epi32((int)i);
+        __m128i v_b_cur_i = _mm_set1_epi32((int)(i + width));
 
-        __m256i v_a_offsets = _mm256_add_epi64(v_a_cur_i, shuffle_ontime_mask_4x64[v_a_gt_mask]);
-        __m256i v_b_offsets = _mm256_add_epi64(v_b_cur_i, shuffle_ontime_mask_4x64[v_b_gt_mask]);
-        _mm256_storeu_si256((__m256i *)(ontime_indices + ontime_num), v_a_offsets);
-        ontime_num += _mm_popcnt_u64((unsigned)v_a_gt_mask);
-        _mm256_storeu_si256((__m256i *)(ontime_indices + ontime_num), v_b_offsets);
-        ontime_num += _mm_popcnt_u64((unsigned)v_b_gt_mask);
+        __m128i v_a_offsets = _mm_add_epi32(v_a_cur_i, _mm_load_si128((const __m128i *)shuffle_ontime_lanes[v_a_gt_mask]));
+        __m128i v_b_offsets = _mm_add_epi32(v_b_cur_i, _mm_load_si128((const __m128i *)shuffle_ontime_lanes[v_b_gt_mask]));
+        _mm_storeu_si128((__m128i *)(ontime_indices + ontime_num), v_a_offsets);
+        ontime_num += _mm_popcnt_u32((unsigned)v_a_gt_mask);
+        _mm_storeu_si128((__m128i *)(ontime_indices + ontime_num), v_b_offsets);
+        ontime_num += _mm_popcnt_u32((unsigned)v_b_gt_mask);
 
-        v_a_offsets = _mm256_add_epi64(v_a_cur_i, shuffle_timeout_mask_4x64[v_a_gt_mask]);
-        v_b_offsets = _mm256_add_epi64(v_b_cur_i, shuffle_timeout_mask_4x64[v_b_gt_mask]);
-        _mm256_storeu_si256((__m256i *)(timeout_indices + timeout_num), v_a_offsets);
-        timeout_num += width - _mm_popcnt_u64((unsigned)v_a_gt_mask);
-        _mm256_storeu_si256((__m256i *)(timeout_indices + timeout_num), v_b_offsets);
-        timeout_num += width - _mm_popcnt_u64((unsigned)v_b_gt_mask);
+        v_a_offsets = _mm_add_epi32(v_a_cur_i, _mm_load_si128((const __m128i *)shuffle_timeout_lanes[v_a_gt_mask]));
+        v_b_offsets = _mm_add_epi32(v_b_cur_i, _mm_load_si128((const __m128i *)shuffle_timeout_lanes[v_b_gt_mask]));
+        _mm_storeu_si128((__m128i *)(timeout_indices + timeout_num), v_a_offsets);
+        timeout_num += width - _mm_popcnt_u32((unsigned)v_a_gt_mask);
+        _mm_storeu_si128((__m128i *)(timeout_indices + timeout_num), v_b_offsets);
+        timeout_num += width - _mm_popcnt_u32((unsigned)v_b_gt_mask);
     }
     for (; i < size; ++i) {
         ontime_indices[ontime_num] = i, timeout_indices[timeout_num] = i;
         ontime_num += (expires[i] > now), timeout_num += (expires[i] <= now);
     }
     return timeout_num;
-}
-
-void slab_initShuffleMask() {
-    __m256i shuffle_timeout_mask_array[16] = {
-        (__m256i)(__v4di){0, 1, 2, 3},
-        (__m256i)(__v4di){1, 2, 3, -1},
-        (__m256i)(__v4di){0, 2, 3, -1},
-        (__m256i)(__v4di){2, 3, -1, -1},
-        (__m256i)(__v4di){0, 1, 3, -1},
-        (__m256i)(__v4di){1, 3, -1, -1},
-        (__m256i)(__v4di){0, 3, -1, -1},
-        (__m256i)(__v4di){3, -1, -1, -1},
-        (__m256i)(__v4di){0, 1, 2, -1},
-        (__m256i)(__v4di){1, 2, -1, -1},
-        (__m256i)(__v4di){0, 2, -1, -1},
-        (__m256i)(__v4di){2, -1, -1, -1},
-        (__m256i)(__v4di){0, 1, -1, -1},
-        (__m256i)(__v4di){1, -1, -1, -1},
-        (__m256i)(__v4di){0, -1, -1, -1},
-        (__m256i)(__v4di){-1, -1, -1, -1},
-    };
-    __m256i shuffle_ontime_mask_array[16] = {
-        (__m256i)(__v4di){-1, -1, -1, -1},
-        (__m256i)(__v4di){0, -1, -1, -1},
-        (__m256i)(__v4di){1, -1, -1, -1},
-        (__m256i)(__v4di){0, 1, -1, -1},
-        (__m256i)(__v4di){2, -1, -1, -1},
-        (__m256i)(__v4di){0, 2, -1, -1},
-        (__m256i)(__v4di){1, 2, -1, -1},
-        (__m256i)(__v4di){0, 1, 2, -1},
-        (__m256i)(__v4di){3, -1, -1, -1},
-        (__m256i)(__v4di){0, 3, -1, -1},
-        (__m256i)(__v4di){1, 3, -1, -1},
-        (__m256i)(__v4di){0, 1, 3, -1},
-        (__m256i)(__v4di){2, 3, -1, -1},
-        (__m256i)(__v4di){0, 2, 3, -1},
-        (__m256i)(__v4di){1, 2, 3, -1},
-        (__m256i)(__v4di){0, 1, 2, 3},
-    };
-
-    int i = 0;
-    for (; i < 16; i++) {
-        shuffle_timeout_mask_4x64[i] = shuffle_timeout_mask_array[i];
-        shuffle_ontime_mask_4x64[i] = shuffle_ontime_mask_array[i];
-    }
 }
 
 #else

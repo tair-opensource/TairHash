@@ -3141,10 +3141,6 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
     RedisModule_RegisterInfoFunc(ctx, infoFunc);
 #endif
 
-#if defined(SLAB_MODE) && defined(__AVX2__)
-    slab_initShuffleMask();
-#endif
-
     g_expire_algorithm.insert = insert;
     g_expire_algorithm.update = update;
     g_expire_algorithm.delete = delete;

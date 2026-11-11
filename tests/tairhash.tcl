@@ -2296,4 +2296,33 @@ start_server {tags {"slab_bug_reproduce"}} {
 
         assert_equal 0 [r exhlen $key]
     }
+
+    test "Active expire removes exactly the expired fields of a partially expired key" {
+        # A random mix of TTLs gives the groups of four lanes every combination of on-time and
+        # timed-out fields, and sizes that are not a multiple of 8 also run the scalar tail.
+        expr {srand(20261111)}
+        foreach size {61 67 200} {
+            set key "test_partial_active_expire_$size"
+            r del $key
+            set keep {}
+            for {set i 0} {$i < $size} {incr i} {
+                if {rand() < 0.5} {
+                    r exhset $key field_$i val PX 500
+                } else {
+                    r exhset $key field_$i val EX 100
+                    lappend keep field_$i
+                }
+            }
+
+            # EXHLEN neither triggers nor filters expiration, so only active expire can shrink it.
+            set want [llength $keep]
+            wait_for_condition 100 100 {
+                [r exhlen $key] == $want
+            } else {
+                fail "active expire left [r exhlen $key] of $size fields, expected $want"
+            }
+            assert_equal [lsort $keep] [lsort [r exhkeys $key]]
+            r del $key
+        }
+    }
 }

@@ -995,6 +995,302 @@ OK
 
 <br/>
 
+## Last-write-wins and source-of-truth sync
+
+These commands keep a TairHash as a cache of an external source of truth (for example a
+database table holding the latest value per field) without ever serving a partial or stale
+copy as complete:
+
+1. Writers apply each change with `EXHMSETLWW` and each delete with `EXHDELLWW`, using the
+   source's write timestamp as the version. A write that loses to a newer one is an expected
+   outcome, not an error.
+2. Readers call `EXHSYNCGET`. A hash that is not synced (new, evicted, or invalidated by a
+   restart or failover, see below) is a miss: the reader calls `EXHSYNCBEGIN`, then reads the
+   full set of fields from the source, and hands it to `EXHSYNC` together with the token
+   `EXHSYNCBEGIN` returned.
+3. `EXHSYNC` merges the snapshot, removes fields the source no longer has, and marks the
+   hash synced. Fields written after the token raced the snapshot read and are kept,
+   whatever their version.
+
+What keeps a synced hash correct:
+
+- **Tombstones.** `EXHDELLWW` leaves a tombstone holding the delete's version for
+  `lww_tombstone_ttl` seconds (default 3600). A write or snapshot entry with the same or a
+  lower version loses to it, so a snapshot read before a delete cannot bring the field back.
+  A hash left with only tombstones gets a key TTL ending with its last tombstone. A
+  tombstone whose time has passed holds nothing off any more, but it stays in memory until a
+  later `EXHMSETLWW`, `EXHDELLWW` or `EXHSYNC` of the hash drops it (a replica drops its own
+  when it applies writes to the hash) or the hash is loaded from an RDB again: a hash that
+  takes no further write keeps its expired tombstones. They are left out of an RDB, an AOF
+  rewrite and a full sync. A write by another command (`EXHSET`, `EXHSETNX`, `EXHMSET`,
+  `EXHMSETWITHOPTS`, `EXHINCRBY`, `EXHINCRBYFLOAT`) to a field that has a tombstone removes
+  the tombstone and continues from the delete's version as it would from a field's: the
+  field gets that version plus one, so the writes the tombstone held off still lose. `GT`
+  compares its version with the tombstone's; `ABS` sets the version it is given and so
+  overrides the tombstone.
+- **Leases.** `EXHSYNC` succeeds only while the hash holds the lease `EXHSYNCBEGIN` opened
+  with that token: not after the key was deleted, evicted or recreated, after another sync
+  completed, after the sync epoch changed (see below), or after `sync_lease_ttl` seconds
+  (default 60). The caller then starts over with `EXHSYNCBEGIN`. Concurrent syncs of a hash
+  share one lease; the first `EXHSYNC` wins. For a missing key, `EXHSYNCBEGIN` creates an
+  empty placeholder with a TTL of `sync_lease_ttl`, and a TairHash without fields that is
+  not synced gets that TTL too unless the key has one of its own, so an abandoned sync
+  leaves nothing behind. A TairHash that was synced without fields and lost its sync when
+  the epoch changed becomes such a placeholder only when `EXHSYNCBEGIN` is called for it,
+  and is deleted by an `EXHSYNCGET` that misses it: one that is never read or synced again
+  stays as an empty key, unless the key has a TTL of its own.
+- **Sync epochs.** A hash is synced only in the epoch `EXHSYNC` marked it in. A master starts
+  a new epoch when the module loads, after it loads an RDB or AOF (a restart, `DEBUG
+  RELOAD`) and when it is promoted, since each can lose writes the synced hashes reflected;
+  synced hashes then read as misses until they are synced again. Their data, tombstones and
+  write sequences are kept. The master puts the new epoch in the replication stream, after
+  everything it replicated under the previous one, so a replica has its master's epoch as of
+  the point of the stream it has applied: it reads a hash as synced exactly when its master
+  did at that point, whether it follows the stream, replays it from the backlog after a
+  partial resync or replicates from another replica. A full sync, and the RDB a replica
+  restarts from, carry the epoch as well. A master that becomes a replica has no epoch, and
+  reads every hash as a miss, until it has loaded or applied its new master's.
+
+A TTL the module set (a placeholder's, or that of a hash with only tombstones) lasts only
+while the hash has no fields: the first command that adds a field, and `EXHSYNC`, remove it.
+A TTL the key had of its own is left alone. Set a cache TTL after `EXHSYNC`, not during a
+sync, as the sync may remove it.
+
+The sync state belongs to the hash, whatever its key is called. `RENAME` and `MOVE` move a
+TairHash with its sync state, its tombstones and a sync that is open, whose token is then
+accepted under the new name. `COPY` makes a new TairHash that has the fields but is not
+synced and has no tombstones or open sync: writes keep going to the original only. `RESTORE`
+does not make a hash synced either, since a payload can be older than writes the hash has
+taken since it was dumped; the tombstones in the payload are restored, so a migrated key keeps
+holding off late writes.
+
+`EXHSYNCBEGIN`, `EXHSYNC` and `EXHSYNCGET` need the server events of Redis 6.0 or later (or
+Valkey) to renew the epoch, and are not registered on older servers. `EXHMSETLWW` and
+`EXHDELLWW` work everywhere.
+
+Every value write (by any command) is stamped with a server-assigned write sequence: the
+larger of the wall clock in microseconds and the previous sequence plus one. It is strictly
+increasing, is replicated and persisted, and stays above sequences handed out by an earlier
+process or a failed-over master as long as the nodes' clocks agree better than the time a
+restart or failover takes. Sync tokens and epochs are drawn from the same sequence.
+
+#### EXHMSETLWW
+
+
+Grammar and complexity：
+
+
+> EXHMSETLWW key field value version [field value version ...]
+> time complexity：O(N), N is the number of fields
+
+
+
+Command Description：
+
+
+> Apply last-write-wins writes to the fields of the TairHash specified by key, creating it if it does not exist. A write lands when the field does not exist and has no tombstone with the same or a higher version (see EXHDELLWW), when its version is higher than the field's, or when the versions are equal and its value is byte-wise greater (shorter values sort first when one is a prefix of the other). The tie-break is the one Cassandra/Scylla use for equal write timestamps, so the result does not depend on the order writes arrive in. A landed write replaces the value and version, clears the field's TTL and drops its tombstone. Fields are applied in argument order.
+
+
+
+Parameter：
+
+
+> key: The key used to find the TairHash
+> field: An element in TairHash
+> value: The value to write
+> version: The version of the write, a positive integer (for example the source's write timestamp in microseconds)
+
+
+
+Return：
+
+
+> An array with one integer per field: 1 if the write landed, 0 if the field already held a winning write or was deleted at the same or a higher version
+> Error: syntax error if a version is not a positive integer (nothing is written); WRONGTYPE if the key holds another type
+
+```sh
+127.0.0.1:6379> EXHMSETLWW k0 f1 21.5 1731300000000001 f2 7 1731300000000001
+1) (integer) 1
+2) (integer) 1
+127.0.0.1:6379> EXHMSETLWW k0 f1 20.9 1731299999000000 f2 8 1731300000000001
+1) (integer) 0
+2) (integer) 1
+127.0.0.1:6379> EXHGETWITHVER k0 f2
+1) "8"
+2) (integer) 1731300000000001
+```
+
+#### EXHDELLWW
+
+
+Grammar and complexity：
+
+
+> EXHDELLWW key field version [field version ...]
+> time complexity：O(N), N is the number of fields
+
+
+
+Command Description：
+
+
+> Apply last-write-wins deletes to the fields of the TairHash specified by key. A delete removes the field unless it holds a write with a higher version (a delete wins a tie), and leaves a tombstone with the delete's version that writes and EXHSYNC snapshot entries with the same or a lower version lose to, until `lww_tombstone_ttl` seconds have passed. The key is created if it does not exist, so that a delete that arrives before the write it supersedes still holds it off; a TairHash left with only tombstones gets a key TTL ending with its last tombstone, unless the key has a TTL of its own, and is kept until then. Fields are applied in argument order.
+
+
+
+Parameter：
+
+
+> key: The key used to find the TairHash
+> field: An element in TairHash
+> version: The version of the delete, a positive integer
+
+
+
+Return：
+
+
+> An array with one integer per field: 1 if the field is deleted at that version (by this delete, or already by one with the same or a higher version), 0 if a newer write keeps it
+> Error: syntax error if a version is not a positive integer (nothing is deleted); WRONGTYPE if the key holds another type
+
+```sh
+127.0.0.1:6379> EXHMSETLWW k3 f1 a 10 f2 b 20
+1) (integer) 1
+2) (integer) 1
+127.0.0.1:6379> EXHDELLWW k3 f1 11 f2 15
+1) (integer) 1
+2) (integer) 0
+127.0.0.1:6379> EXHMSETLWW k3 f1 late 11
+1) (integer) 0
+```
+
+#### EXHSYNCGET
+
+
+Grammar and complexity：
+
+
+> EXHSYNCGET key [field ...]
+> time complexity：O(N), N is the number of fields in the TairHash, or of the fields given
+
+
+
+Command Description：
+
+
+> Read the TairHash specified by key if it is synced in the current epoch (see EXHSYNC). A TairHash that does not exist or is not synced is a miss: no fields are returned, and the caller syncs it with EXHSYNCBEGIN and EXHSYNC. With fields given, only those that exist are returned, in request order; on a synced TairHash a missing field means the source has no value for it. Expired fields are not returned. Like the other reads, it changes the TairHash only to remove expired fields, so it does not abort a WATCH unless a field expired. On a miss it also deletes a TairHash that is left with nothing: no fields, tombstones or open sync, as one that was synced empty in an earlier epoch.
+
+
+
+Parameter：
+
+
+> key: The key used to find the TairHash
+> field: Fields to return (default: all fields)
+
+
+
+Return：
+
+
+> An array of two elements: 1 if the TairHash is synced and 0 otherwise, and an array of field, value, version triples (empty on a miss)
+> Error: WRONGTYPE if the key holds another type
+
+```sh
+127.0.0.1:6379> EXHSYNCGET k1
+1) (integer) 0
+2) (empty array)
+127.0.0.1:6379> EXHSYNCBEGIN k1
+(integer) 1794387046202298
+127.0.0.1:6379> EXHSYNC k1 1794387046202298 f1 21.5 1731300000000001
+1) (integer) 1
+2) (integer) 0
+127.0.0.1:6379> EXHSYNCGET k1 f1 missing
+1) (integer) 1
+2) 1) "f1"
+   2) "21.5"
+   3) (integer) 1731300000000001
+```
+
+#### EXHSYNCBEGIN
+
+
+Grammar and complexity：
+
+
+> EXHSYNCBEGIN key
+> time complexity：O(1)
+
+
+
+Command Description：
+
+
+> Open a sync of the TairHash specified by key with the source of truth, and return its token. Read the source after this call and pass the snapshot and the token to EXHSYNC. Every write after this call sorts above the token. The lease lasts `sync_lease_ttl` seconds, until an EXHSYNC with the token completes or until the key goes away; a call while a lease is open returns the same token. A missing key is created as an empty, unsynced placeholder with a TTL of `sync_lease_ttl`. A TairHash that has no fields and is not synced (one that was synced empty in an earlier epoch, or holds only tombstones) is treated as one: it gets that TTL if the key has none, and a TTL the module set is extended to at least that. A TTL the key has of its own is left alone. The lease is neither persisted nor replicated: a sync that spans a restart or a failover fails and starts over.
+
+
+
+Parameter：
+
+
+> key: The key used to find the TairHash
+
+
+
+Return：
+
+
+> The sync token, a positive integer
+> Error: WRONGTYPE if the key holds another type
+
+#### EXHSYNC
+
+
+Grammar and complexity：
+
+
+> EXHSYNC key token [field value version ...]
+> time complexity：O(N + M + T), N is the number of fields in the snapshot, M the number of fields in the TairHash, T the number of its tombstones
+
+
+
+Command Description：
+
+
+> Complete the sync EXHSYNCBEGIN opened with token, using a full snapshot of the source of truth read after that call. Snapshot fields are merged with EXHMSETLWW semantics, so fields deleted at the same or a higher version stay deleted. Fields not in the snapshot are removed unless they were written after token. The TairHash is then marked synced in the current epoch, the lease is closed, and a TTL the module set is removed. A synced TairHash is kept even when it has no fields, so an empty snapshot caches "the source has nothing for this key". It stays synced until the key is deleted or the epoch changes. Fails without changing anything unless the TairHash holds the lease of token.
+
+
+
+Parameter：
+
+
+> key: The key used to find the TairHash
+> token: The token EXHSYNCBEGIN returned before the snapshot was read
+> field value version: The snapshot; versions are positive integers
+
+
+
+Return：
+
+
+> An array of two integers: the number of snapshot fields whose write landed, and the number of fields removed
+> Error: syntax error if the token or a version is not a positive integer, and `ERR no sync lease for this token: call EXHSYNCBEGIN again` if the TairHash does not hold the lease of token (nothing is changed in either case); WRONGTYPE if the key holds another type
+
+```sh
+127.0.0.1:6379> EXHSYNCBEGIN k2
+(integer) 1794387046210665
+127.0.0.1:6379> EXHSYNC k2 1794387046210665
+1) (integer) 0
+2) (integer) 0
+127.0.0.1:6379> EXHSYNCGET k2
+1) (integer) 1
+2) (empty array)
+127.0.0.1:6379> EXHSYNC k2 1794387046210665
+(error) ERR no sync lease for this token: call EXHSYNCBEGIN again
+```
+
+<br/>
+
 ## Replication and persistence
 
 Write commands replicate the resulting state of each field they wrote rather than the
@@ -1003,16 +1299,27 @@ independently of its own clock and state. The `replication_format` module option
 the commands:
 
 - `state` (the default): one internal
-  `EXHMSETREPL key 1 field value version expire [field value version expire ...]` per write
-  command, with the expire as an absolute unix time in milliseconds, 0 for none. A write of
-  more than 8192 fields is split into several, propagated together in a MULTI/EXEC. A write
-  that leaves the values alone (the `EXHEXPIRE` family, `EXHPERSIST`, `EXHSETVER`) sends
-  `EXHMETAREPL key 1 field version expire [...]` instead, without the value. The `1` names
-  the argument layout; a node rejects a layout it does not know and logs the write it drops.
+  `EXHMSETREPL key 2 field value version expire seq [field value version expire seq ...]`
+  per write command, with the expire as an absolute unix time in milliseconds, 0 for none,
+  and the field's write sequence. A write of more than 8192 fields is split into several,
+  propagated together in a MULTI/EXEC. A write that leaves the values alone (the `EXHEXPIRE`
+  family, `EXHPERSIST`, `EXHSETVER`) sends `EXHMETAREPL key 1 field version expire [...]`
+  instead, without the value. The number after the key names the argument layout; a node
+  rejects a layout it does not know and logs the write it drops, and accepts `EXHMSETREPL`
+  layout 1 (TairHash 2.0, without the write sequence) by assigning sequences itself.
   An `EXHMETAREPL` for a field the node does not have means that the node has diverged from
   its master: it updates the fields it has, logs the others and replies an error.
-  AOF rewrite emits `EXHMSETREPL` with up to 64 fields each. Both commands are accepted only
-  from the replication stream or while loading; a regular client gets
+  The sync state of a hash (its epoch, 0 when not synced, and whether the module owns the
+  key's TTL) is sent as `EXHSYNCREPL key epoch owns_ttl`, followed by the `PEXPIREAT` or
+  `PERSIST` of such a TTL, and `EXHDELLWW` sends
+  `EXHTOMBREPL key 1 field version deadline [...]` with the tombstone deadlines it set. AOF
+  rewrite emits these too, and `EXHMSETREPL` with up to 64 fields each. A master that starts
+  a new sync epoch sends `EXHSYNCEPOCH epoch`, which a replica takes as its own epoch. It
+  does so once a hash has been synced on it, and before the first one otherwise, so a master
+  whose sync commands are not used sends nothing an older TairHash does not know. The
+  current sync epoch is also saved in the RDB as module aux data, so a TairHash 2.1 RDB needs
+  the module to load even without TairHash keys. These commands are
+  accepted only from the replication stream or while loading; a regular client gets
   `ERR only accepted from the replication stream or while loading` (a server that cannot
   report which context flags it supports, because it lacks `RedisModule_GetContextFlagsAll`,
   which Redis has from 6.0.9 on, always accepts them). So a state-format AOF or replication
@@ -1023,4 +1330,7 @@ the commands:
   written by TairHash 1.x has it). From the replication stream or the AOF, `EXHSETNX` leaves
   the new field at version 0; sent by a client, it starts the field at version 1. The fields
   of one write command are propagated together in a MULTI/EXEC. TairHash 1.x accepts these
-  commands, which is what an upgrade relies on; see the README.
+  commands, which is what an upgrade relies on; see the README. They carry no write sequence:
+  a replica or an AOF replay assigns its own, later ones, so `EXHSYNC` with a token from
+  before keeps such fields rather than removing them. `EXHMSETLWW`, `EXHDELLWW` and
+  `EXHSYNC`, which no version without them can apply, always replicate in the state format.

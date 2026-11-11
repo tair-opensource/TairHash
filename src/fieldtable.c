@@ -55,6 +55,7 @@ TairHashField *fieldCreate(const char *name, size_t name_len, const char *value,
     f->next = NULL;
     f->version = 0;
     f->expire = 0;
+    f->seq = 0;
     f->name_len = (uint32_t)name_len;
     f->value_len = (uint32_t)value_len;
     memcpy(f->data, name, name_len);

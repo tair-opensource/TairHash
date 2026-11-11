@@ -117,7 +117,7 @@ start_server {tags {"tairhash replication"} overrides {bind 0.0.0.0}} {
                 set version [dict get $m ver]
             }
         }
-        assert_equal 20000 $version
+        assert_equal 20100 $version
     }
 
     test {EXHSETNX starts a new field at version 1} {
@@ -158,6 +158,38 @@ start_server {tags {"tairhash replication"} overrides {bind 0.0.0.0}} {
         tairhash_propagation_error_behavior r $on_error
     }
 
+    test {The internal LWW commands reject a negative or out-of-range version, deadline, sequence or epoch} {
+        r flushall
+        set on_error [tairhash_propagation_error_behavior r ignore]
+        # One above the highest write sequence a node accepts, LLONG_MAX / 2.
+        set over 4611686018427387904
+        tairhash_load_from_aof [list \
+            {select 9} \
+            {exhmsetrepl neg 2 a v 1 0 -1} \
+            [list exhmsetrepl neg 2 b v 1 0 $over] \
+            {exhtombrepl neg 1 c -5 4102444800000} \
+            {exhtombrepl neg 1 d 1 -1} \
+            {exhsyncrepl neg -1 0} \
+            [list exhsyncrepl neg $over 0] \
+            {exhsyncepoch 0} \
+            [list exhsyncepoch $over] \
+            {exhmsetrepl neg 2 last v 7 0 1} \
+        ]
+        # The last command shows that the ones before it were read.
+        assert_equal {last} [r exhkeys neg]
+        # No tombstone lends a new field its version.
+        r exhset neg c v
+        assert_equal 1 [r exhver neg c]
+        foreach cmd {EXHMSETREPL EXHTOMBREPL EXHSYNCREPL EXHSYNCEPOCH} {
+            assert {[tairhash_logged 0 "$cmd rejected, the write it carries is lost: ERR syntax error"]}
+        }
+        if {[tairhash_server_at_least 6 0]} {
+            # Nothing rejected was observed as a sequence: tokens stay below the bound.
+            assert {[r exhsyncbegin probe] < $over}
+        }
+        tairhash_propagation_error_behavior r $on_error
+    }
+
     test {EXHMSETREPL and EXHMETAREPL on a key of another type are logged} {
         r flushall
         set on_error [tairhash_propagation_error_behavior r ignore]
@@ -181,6 +213,19 @@ start_server {tags {"tairhash replication"} overrides {bind 0.0.0.0}} {
             {select 9}
             {exhmsetrepl full 1 a 1 2 1}
             {exhmetarepl full 1 b 2 1}
+        }
+        assert_equal keep [r exhkeys full]
+        assert_equal 3 [r exhvals full]
+        assert_equal {keep 3} [r exhgetall full]
+        assert_equal {keep 3 1} [r exhgetallwithver full]
+    }
+
+    test {Full reads leave out a field whose TTL EXHMSETREPL layout 2 set and has passed} {
+        r flushall
+        r exhmset full a 1 keep 3
+        tairhash_load_from_aof {
+            {select 9}
+            {exhmsetrepl full 2 a 1 2 1 1}
         }
         assert_equal keep [r exhkeys full]
         assert_equal 3 [r exhvals full]
@@ -330,18 +375,19 @@ foreach format {state compat} {
             close_replication_stream $repl
 
             # Where a command gave a relative TTL the expire is an absolute time in milliseconds
-            # all the same.
+            # all the same. Each field carries its write sequence, a time in microseconds.
             set abs {?????????????}
+            set seq {????????????????}
             if {$format eq {state}} {
                 set expected [list \
-                    {exhmsetrepl w 1 f v 1 0} \
-                    {exhmsetrepl w 1 f v2 2 4000000000000} \
-                    {exhmsetrepl w 1 f v3 3 4000000000000} \
-                    {exhmsetrepl w 1 nx v 1 0} \
-                    {exhmsetrepl w 1 m1 a 1 0 m2 b 1 0} \
-                    "exhmsetrepl w 1 o v 1 $abs" \
-                    {exhmsetrepl w 1 n 5 1 4000000000000} \
-                    {exhmsetrepl w 1 x 1.5 1 0} \
+                    "exhmsetrepl w 2 f v 1 0 $seq" \
+                    "exhmsetrepl w 2 f v2 2 4000000000000 $seq" \
+                    "exhmsetrepl w 2 f v3 3 4000000000000 $seq" \
+                    "exhmsetrepl w 2 nx v 1 0 $seq" \
+                    "exhmsetrepl w 2 m1 a 1 0 $seq m2 b 1 0 $seq" \
+                    "exhmsetrepl w 2 o v 1 $abs $seq" \
+                    "exhmsetrepl w 2 n 5 1 4000000000000 $seq" \
+                    "exhmsetrepl w 2 x 1.5 1 0 $seq" \
                     "exhmetarepl w 1 m1 2 $abs" \
                     {exhmetarepl w 1 m1 3 4000000000000} \
                     "exhmetarepl w 1 m2 2 $abs" \

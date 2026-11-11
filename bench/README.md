@@ -15,12 +15,16 @@ short values and microsecond-timestamp versions.
 
 | Workload | Commands |
 |---|---|
+| `load` | `EXHSYNCBEGIN key`, then `EXHSYNC key <token> <all fields>` per key (keys end up synced); two pipelined round trips per batch |
 | `loadset` | `EXHSET key field value ABS version [EX ttl]` per field |
 | `loadmset` | `EXHMSET` with every field of a key |
 | `loadhset` | native `HSET` with an 8-byte version prefix per value: the memory baseline |
-| `gt` | `EXHSET ... GT version [EX ttl]` of one random field; `--stale` % of ops carry version 1, older than any field (error reply) |
+| `lww` | `EXHMSETLWW` of one random field; `--stale` % of ops carry version 1, older than any field (a losing write) |
+| `gt` | `EXHSET ... GT version [EX ttl]` of one random field, the request shape `EXHMSETLWW` replaces; `--stale` % of ops carry version 1, older than any field (error reply) |
 | `mset` | `EXHMSET` of `--fields-per-write` distinct random fields |
 | `getallver` | `EXHGETALLWITHVER` of a whole key |
+| `syncget` | `EXHSYNCGET` of a whole key |
+| `sync` | `EXHSYNCGET` and `EXHSYNCBEGIN`, then `EXHSYNC` with a full snapshot (the read-repair path); two pipelined round trips per batch |
 
 ## Config
 
@@ -38,7 +42,7 @@ short values and microsecond-timestamp versions.
 | `--fields-per-write` | int | 10 | Fields per `mset` write |
 | `--ops` | int | 4000000 | Operations; size it so the run outlasts the profile |
 | `--pipeline` | int | 64 | Pipeline depth |
-| `--stale` | percent | 10 | Share of `gt` writes with an old version |
+| `--stale` | percent | 10 | Share of `lww` and `gt` writes with an old version |
 | `--ttl` | seconds | 0 | TTL of the fields `loadset` and `gt` write; 0 writes without one. Exercises the expire index and the per-field expiry checks of full reads |
 | `--seconds` | int | 5 | Profile length |
 | `--port` | int | 27101 | Master port; the replica uses port + 1 |
@@ -64,7 +68,8 @@ It exits with status 1 when a population workload (`load*`) gets an error reply.
 ## API / Interfaces
 
 `profile.sh` prints `loadgen`'s result line (`ops_per_sec`, `errors`, `misses` — full reads
-of a key that does not exist — ...), then:
+of a key that does not exist, and `EXHSYNCGET` replies for a hash that is not synced — ...),
+then:
 
 - `master: cpu_us_per_op=... [repl_bytes_per_op=...] [aof_bytes_per_op=...]` — the master's
   CPU time (user + system, from `INFO cpu`) and, with `--replica` and `--aof`, the growth of

@@ -94,29 +94,57 @@ int isExpire(long long when) {
     return RedisModule_Milliseconds() > when;
 }
 
+static int hashIsSynced(const tairHashObj *o);
+static long long liveTombstoneVersion(tairHashObj *o, RedisModuleString *name);
+static void releaseOwnedKeyTtl(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *keyname, tairHashObj *o);
+static int lwwKeepsEmptyHash(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *keyname, tairHashObj *o);
+static void lwwStateFree(lwwState *s);
+
 int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *raw_key, tairHashObj *obj) {
-    if (!obj || (RedisModule_GetContextFlags(ctx) & REDISMODULE_CTX_FLAGS_SLAVE) || (ftSize(&obj->hash) != 0)) {
+    /* A replica gets its master's decision, and a load replays the one in the file: whether an
+     * emptied hash stays depends on its sync state and lease, which neither of them has as the
+     * master had it. */
+    int follows_log = RedisModule_GetContextFlags(ctx) & (REDISMODULE_CTX_FLAGS_SLAVE | REDISMODULE_CTX_FLAGS_LOADING);
+    if (!obj || hashIsSynced(obj) || follows_log || (ftSize(&obj->hash) != 0)) {
         return 0;
     }
     /* raw_key is still used after the key is deleted, so it must not be owned by obj. */
     Module_Assert(raw_key != obj->key);
 
+    int opened = 0;
     if (key == NULL) {
         key = RedisModule_OpenKey(ctx, raw_key, REDISMODULE_WRITE);
         if (RedisModule_KeyType(key) == REDISMODULE_KEYTYPE_EMPTY) {
             RedisModule_CloseKey(key);
             return 0;
         }
+        opened = 1;
+    }
+    /* Before Redis 6.2 a callback context that has propagated keeps its MULTI open until it
+     * is freed, and a command RedisModule_Call runs before that, as the expire timer does for
+     * the next field, opens another one inside it (see the bugfixes below). A thread safe
+     * context propagates at once and wraps nothing. */
+    RedisModuleCtx *ctx2 = NULL;
+    if (redis_major_ver < 6 || (redis_major_ver == 6 && redis_minor_ver < 2)) {
+        ctx2 = RedisModule_GetThreadSafeContext(NULL);
+        RedisModule_SelectDb(ctx2, RedisModule_GetSelectedDb(ctx));
+    }
+    if (lwwKeepsEmptyHash(ctx2 ? ctx2 : ctx, key, raw_key, obj)) {
+        if (opened) {
+            RedisModule_CloseKey(key);
+        }
+        if (ctx2) {
+            RedisModule_FreeThreadSafeContext(ctx2);
+        }
+        return 0;
     }
 
-    if (redis_major_ver < 6 || (redis_major_ver == 6 && redis_minor_ver < 2)) {
+    if (ctx2) {
         /* See bugfix: https://github.com/redis/redis/pull/8617
                        https://github.com/redis/redis/pull/8097
                        https://github.com/redis/redis/pull/7037
         */
         RedisModule_CloseKey(key);
-        RedisModuleCtx *ctx2 = RedisModule_GetThreadSafeContext(NULL);
-        RedisModule_SelectDb(ctx2, RedisModule_GetSelectedDb(ctx));
         RedisModuleCallReply *reply = RedisModule_Call(ctx2, "DEL", "s!", raw_key);
         if (reply != NULL) RedisModule_FreeCallReply(reply);
         RedisModule_FreeThreadSafeContext(ctx2);
@@ -170,6 +198,7 @@ static void tairHashTypeReleaseObject(struct tairHashObj *o) {
     if (o->key) {
         RedisModule_FreeString(NULL, o->key);
     }
+    lwwStateFree(o->lww);
     RedisModule_Free(o);
 }
 
@@ -177,7 +206,7 @@ static void tairHashTypeReleaseObject(struct tairHashObj *o) {
  * every emptied TairHash to a background thread. Count the object itself so small values
  * are freed synchronously. */
 static size_t tairHashFreeEffort(const struct tairHashObj *o) {
-    return 1 + ftSize(&o->hash) + TAIRHASH_EXPIRE_INDEX_LEN(o);
+    return 1 + ftSize(&o->hash) + TAIRHASH_EXPIRE_INDEX_LEN(o) + (o->lww ? ftSize(&o->lww->tombstones) : 0);
 }
 
 static struct tairHashObj *createTairHashTypeObject() {
@@ -194,13 +223,27 @@ static TairHashField *fieldLookup(tairHashObj *o, RedisModuleString *name) {
     return ftFind(&o->hash, ptr, len);
 }
 
-/* Adds a field with this name and value; version and expire start at 0. */
+/* Adds a field with this name and value; expire and seq start at 0, and so does the version
+ * unless the field replaces a tombstone (a field and its tombstone never exist together).
+ * It then starts at the delete's version while the tombstone's retention lasts, so that a
+ * command that increments the version, as it does on an existing field, puts it above every
+ * write the tombstone held off. */
 static TairHashField *fieldInsert(tairHashObj *o, RedisModuleString *name, RedisModuleString *value) {
     size_t name_len, value_len;
     const char *name_ptr = RedisModule_StringPtrLen(name, &name_len);
     const char *value_ptr = RedisModule_StringPtrLen(value, &value_len);
     TairHashField *f = fieldCreate(name_ptr, name_len, value_ptr, value_len);
     ftAdd(&o->hash, f);
+    if (o->lww && ftSize(&o->lww->tombstones)) {
+        TairHashField *t = ftUnlink(&o->lww->tombstones, name_ptr, name_len);
+        if (t != NULL) {
+            if (t->expire > RedisModule_Milliseconds()) {
+                /* Short of the end by more than one command can increment it. */
+                f->version = t->version < LLONG_MAX - INT_MAX ? t->version : LLONG_MAX - INT_MAX;
+            }
+            fieldFree(t);
+        }
+    }
     return f;
 }
 
@@ -244,6 +287,42 @@ void tairHashEnsureExpireIndex(tairHashObj *o) {
 #endif
 }
 
+/* ========================== Write sequence =============================*/
+
+/* Highest write sequence assigned or observed (replication, RDB, AOF) by this server. */
+static long long g_last_seq = 0;
+
+/* Set at load time when the server provides RedisModule_CachedMicroseconds (Redis 7.2+). */
+static long long (*g_cached_microseconds)(void) = NULL;
+
+static long long ustime(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return ((long long)tv.tv_sec) * 1000000 + tv.tv_usec;
+}
+
+/* Wall-clock microseconds for sequence assignment. Read it once per command and pass
+ * it to every tairHashNextSeq of that command: a clock read per field was a measurable
+ * share of a write. The server's cached command time is used where available. */
+static long long seqClockNow(void) {
+    return g_cached_microseconds ? g_cached_microseconds() : ustime();
+}
+
+/* A hybrid logical clock: max(last + 1, wall-clock microseconds). It is strictly
+ * increasing within a process, and because it tracks wall time it stays above the
+ * sequences a previous process (or a failed-over master) handed out, even when no
+ * state was persisted. The state format replicates sequences explicitly. */
+static long long tairHashNextSeq(long long now) {
+    g_last_seq = now > g_last_seq ? now : g_last_seq + 1;
+    return g_last_seq;
+}
+
+static void tairHashObserveSeq(long long seq) {
+    if (seq > g_last_seq) {
+        g_last_seq = seq;
+    }
+}
+
 /* How a field's state is written as a command TairHash 1.x also accepts (the compat format).
  * EXHSET ... ABS <version> [PXAT <expire>] sets value, version and TTL exactly, but
  * cannot set version 0. Only a field that TairHash 1.x created with EXHSETNX and nothing
@@ -269,6 +348,7 @@ typedef struct {
     RedisModuleString *value;
     long long version;
     long long expire;
+    long long seq;
 } FieldState;
 
 /* How write commands and AOF rewrite propagate field state (replication_format). */
@@ -279,11 +359,13 @@ typedef enum {
 
 static int g_replication_format = REPLICATION_FORMAT_STATE;
 
-/* EXHMSETREPL <key> <layout> <field> <value> <version> <expire> [...]: the layout names
- * the per-field arguments, so a replica rejects a layout it does not know instead of
- * misreading it. Layout 1 is field, value, version, expire. */
-#define FIELD_STATE_LAYOUT 1
-#define FIELD_STATE_ARGS 4
+/* EXHMSETREPL <key> <layout> <field> <value> <version> <expire> [<seq>] [...]: the layout
+ * names the per-field arguments, so a replica rejects a layout it does not know instead
+ * of misreading it. Layout 1 (TairHash 2.0) is field, value, version, expire; layout 2
+ * adds the write sequence. */
+#define FIELD_STATE_LAYOUT 2
+#define FIELD_STATE_ARGS 5
+#define FIELD_STATE_ARGS_LAYOUT_1 4
 
 /* Fields per propagated EXHMSETREPL. A write is one command, split only so that a huge one
  * stays within what a replica accepts (Redis 6.2 and older reject commands of more than
@@ -296,7 +378,7 @@ static int g_replication_format = REPLICATION_FORMAT_STATE;
 #define FIELD_META_LAYOUT 1
 #define FIELD_META_ARGS 3
 
-/* Shared "1" (the layout) and "0" (the expire of a field without a TTL); created at load time. */
+/* Shared FIELD_STATE_LAYOUT and "0" (the expire of a field without a TTL); created at load time. */
 static RedisModuleString *g_layout_str = NULL;
 static RedisModuleString *g_zero_str = NULL;
 
@@ -332,6 +414,7 @@ typedef struct {
     FieldState *fields;
     int len;
     int cap;
+    int format; /* ReplicationFormat */
 } FieldStateBatch;
 
 static void fieldStateBatchInit(FieldStateBatch *b, RedisModuleCtx *ctx, RedisModuleString *key, int fields_hint) {
@@ -340,6 +423,7 @@ static void fieldStateBatchInit(FieldStateBatch *b, RedisModuleCtx *ctx, RedisMo
     b->len = 0;
     b->cap = fields_hint > 0 ? fields_hint : 1;
     b->fields = RedisModule_Alloc(sizeof(FieldState) * b->cap);
+    b->format = g_replication_format;
 }
 
 /* Snapshots the state of field f. `name` and `value` are the field's name and value as
@@ -359,6 +443,7 @@ static void fieldStateBatchAdd(FieldStateBatch *b, RedisModuleString *name, Redi
     st->value = value;
     st->version = f->version;
     st->expire = f->expire;
+    st->seq = f->seq;
 }
 
 static void replicateOneFieldState(RedisModuleCtx *ctx, RedisModuleString *key, const FieldState *st) {
@@ -391,6 +476,7 @@ static void replicateFieldStates(RedisModuleCtx *ctx, RedisModuleString *key, co
         a[1] = fields[i].value;
         a[2] = RedisModule_CreateStringFromLongLong(NULL, fields[i].version);
         a[3] = fields[i].expire ? RedisModule_CreateStringFromLongLong(NULL, fields[i].expire) : g_zero_str;
+        a[4] = RedisModule_CreateStringFromLongLong(NULL, fields[i].seq);
     }
     RedisModule_Replicate(ctx, "EXHMSETREPL", "v", argv, (size_t)argc);
     for (int i = 0; i < n; i++) {
@@ -399,6 +485,7 @@ static void replicateFieldStates(RedisModuleCtx *ctx, RedisModuleString *key, co
         if (a[3] != g_zero_str) {
             RedisModule_FreeString(NULL, a[3]);
         }
+        RedisModule_FreeString(NULL, a[4]);
     }
     RedisModule_Free(argv);
 }
@@ -407,7 +494,7 @@ static void replicateFieldStates(RedisModuleCtx *ctx, RedisModuleString *key, co
  * the caller). */
 static void fieldStateBatchFlush(FieldStateBatch *b) {
     if (b->len > 0) {
-        if (g_replication_format == REPLICATION_FORMAT_STATE) {
+        if (b->format == REPLICATION_FORMAT_STATE) {
             replicateFieldStates(b->ctx, b->key, b->fields, b->len);
         } else {
             for (int i = 0; i < b->len; i++) {
@@ -1179,6 +1266,10 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         return REDISMODULE_ERR;
     }
 
+    /* Read before any key or field lookup: the clock read serializes the pipeline
+     * (ISB on arm64, lfence/rdtscp on x86), stalling on any cache miss still in flight. */
+    long long now = seqClockNow();
+
     long long milliseconds = 0, expire = 0, version = 0;
     RedisModuleString *expire_p = NULL, *version_p = NULL;
     int ex_flags = TAIR_HASH_SET_NO_FLAGS;
@@ -1287,6 +1378,12 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
             RedisModule_ReplyWithLongLong(ctx, -1);
             return REDISMODULE_ERR;
         }
+        /* The current version of a deleted field is its tombstone's. */
+        if ((ex_flags & TAIR_HASH_SET_WITH_GT_VER) && version <= liveTombstoneVersion(tair_hash_obj, skey)) {
+            abortWrite(ctx, key, pkey, tair_hash_obj);
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION);
+            return REDISMODULE_ERR;
+        }
         nokey = 1;
         tair_hash_val = fieldInsert(tair_hash_obj, skey, argv[3]);
     } else {
@@ -1339,9 +1436,11 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         ftSetExpire(&tair_hash_obj->hash, tair_hash_val, milliseconds);
     }
 
+    tair_hash_val->seq = tairHashNextSeq(now);
     RedisModule_ReplyWithLongLong(ctx, nokey ? 1 : 0);
 
     replicateFieldState(ctx, argv[1], argv[2], argv[3], tair_hash_val);
+    releaseOwnedKeyTtl(ctx, key, argv[1], tair_hash_obj);
     return REDISMODULE_OK;
 }
 
@@ -1355,6 +1454,10 @@ int TairHashTypeHsetNx_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **arg
     if (!fieldArgsFit(ctx, argv, 2, 3, 2, 1)) {
         return REDISMODULE_ERR;
     }
+
+    /* Read before any key or field lookup: the clock read serializes the pipeline
+     * (ISB on arm64, lfence/rdtscp on x86), stalling on any cache miss still in flight. */
+    long long now = seqClockNow();
 
     RedisModuleKey *key = openKeyAfterPassiveExpire(ctx, RedisModule_GetSelectedDb(ctx), argv[1]);
     int type = RedisModule_KeyType(key);
@@ -1382,12 +1485,19 @@ int TairHashTypeHsetNx_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **arg
     }
 
     TairHashField *tair_hash_val = fieldInsert(tair_hash_obj, skey, svalue);
-    /* A new field starts at version 1, as with EXHSET; version 0 means "no version". From the
+    /* A new field starts at version 1, as with EXHSET, or one above the version of the
+     * tombstone it replaces (see fieldInsert); version 0 means "no version". From the
      * replication stream or the AOF the command states a field at version 0 instead: TairHash
      * 1.x and the compat format have no other way to write one. */
-    tair_hash_val->version = isRestoringState(ctx) ? 0 : 1;
+    if (isRestoringState(ctx)) {
+        tair_hash_val->version = 0;
+    } else {
+        tair_hash_val->version++;
+    }
+    tair_hash_val->seq = tairHashNextSeq(now);
 
     replicateFieldState(ctx, pkey, skey, svalue, tair_hash_val);
+    releaseOwnedKeyTtl(ctx, key, pkey, tair_hash_obj);
     RedisModule_ReplyWithLongLong(ctx, 1);
     return REDISMODULE_OK;
 }
@@ -1402,6 +1512,10 @@ int TairHashTypeHmset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
     if (!fieldArgsFit(ctx, argv, 2, argc, 2, 1)) {
         return REDISMODULE_ERR;
     }
+
+    /* Read before any key or field lookup: the clock read serializes the pipeline
+     * (ISB on arm64, lfence/rdtscp on x86), stalling on any cache miss still in flight. */
+    long long now = seqClockNow();
 
     RedisModuleKey *key = openKeyAfterPassiveExpire(ctx, RedisModule_GetSelectedDb(ctx), argv[1]);
     int type = RedisModule_KeyType(key);
@@ -1442,9 +1556,11 @@ int TairHashTypeHmset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
             tair_hash_val = fieldSetValue(tair_hash_obj, tair_hash_val, argv[i + 1]);
         }
         tair_hash_val->version++;
+        tair_hash_val->seq = tairHashNextSeq(now);
         fieldStateBatchAdd(&batch, argv[i], argv[i + 1], tair_hash_val);
     }
     fieldStateBatchFlush(&batch);
+    releaseOwnedKeyTtl(ctx, key, argv[1], tair_hash_obj);
 
     RedisModule_ReplyWithSimpleString(ctx, "OK");
     return REDISMODULE_OK;
@@ -1460,6 +1576,10 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
     if (!fieldArgsFit(ctx, argv, 2, argc, 4, 1)) {
         return REDISMODULE_ERR;
     }
+
+    /* Read before any key or field lookup: the clock read serializes the pipeline
+     * (ISB on arm64, lfence/rdtscp on x86), stalling on any cache miss still in flight. */
+    long long seq_now = seqClockNow();
 
     RedisModuleKey *key = openKeyAfterPassiveExpire(ctx, RedisModule_GetSelectedDb(ctx), argv[1]);
     int type = RedisModule_KeyType(key);
@@ -1530,6 +1650,7 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
             nokey = 0;
         }
         tair_hash_val->version++;
+        tair_hash_val->seq = tairHashNextSeq(seq_now);
 
         /* Cannot overflow: the loop above checked it. */
         expireToAbsoluteMs(when, 1, now, &when);
@@ -1543,6 +1664,7 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
         fieldStateBatchAdd(&batch, argv[i], argv[i + 1], tair_hash_val);
     }
     fieldStateBatchFlush(&batch);
+    releaseOwnedKeyTtl(ctx, key, argv[1], tair_hash_obj);
 
     RedisModule_ReplyWithSimpleString(ctx, "OK");
     return REDISMODULE_OK;
@@ -1750,6 +1872,10 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         return REDISMODULE_ERR;
     }
 
+    /* Read before any key or field lookup: the clock read serializes the pipeline
+     * (ISB on arm64, lfence/rdtscp on x86), stalling on any cache miss still in flight. */
+    long long now = seqClockNow();
+
     long long milliseconds = 0, expire = 0, incr = 0, version = 0, min = 0, max = 0;
     RedisModuleString *expire_p = NULL;
     RedisModuleString *version_p = NULL;
@@ -1896,6 +2022,11 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
             RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION_OVERFLOW);
             return REDISMODULE_ERR;
         }
+    } else if (tair_hash_obj && (ex_flags & TAIR_HASH_SET_WITH_GT_VER) && version <= liveTombstoneVersion(tair_hash_obj, argv[2])) {
+        /* The current version of a deleted field is its tombstone's. */
+        abortWrite(ctx, key, argv[1], tair_hash_obj);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION);
+        return REDISMODULE_ERR;
     }
 
     if ((incr < 0 && cur_val < 0 && incr < (LLONG_MIN - cur_val)) || (incr > 0 && cur_val > 0 && incr > (LLONG_MAX - cur_val)) || (max_p != NULL && cur_val + incr > max) || (min_p != NULL && cur_val + incr < min)) {
@@ -1942,7 +2073,9 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
         ftSetExpire(&tair_hash_obj->hash, tair_hash_val, milliseconds);
     }
 
+    tair_hash_val->seq = tairHashNextSeq(now);
     replicateFieldState(ctx, argv[1], argv[2], value, tair_hash_val);
+    releaseOwnedKeyTtl(ctx, key, argv[1], tair_hash_obj);
     RedisModule_ReplyWithLongLong(ctx, cur_val);
     return REDISMODULE_OK;
 }
@@ -1958,6 +2091,10 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
     if (!fieldArgsFit(ctx, argv, 2, 3, 1, 0)) {
         return REDISMODULE_ERR;
     }
+
+    /* Read before any key or field lookup: the clock read serializes the pipeline
+     * (ISB on arm64, lfence/rdtscp on x86), stalling on any cache miss still in flight. */
+    long long now = seqClockNow();
 
     long long milliseconds = 0, expire = 0, version = 0;
     long double incr = 0, min = 0, max = 0;
@@ -2106,6 +2243,11 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
             RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION_OVERFLOW);
             return REDISMODULE_ERR;
         }
+    } else if (tair_hash_obj && (ex_flags & TAIR_HASH_SET_WITH_GT_VER) && version <= liveTombstoneVersion(tair_hash_obj, argv[2])) {
+        /* The current version of a deleted field is its tombstone's. */
+        abortWrite(ctx, key, argv[1], tair_hash_obj);
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_VERSION);
+        return REDISMODULE_ERR;
     }
 
     if (isnan(cur_val + incr) || isinf(cur_val + incr) || (max_p != NULL && cur_val + incr > max) || (min_p != NULL && cur_val + incr < min)) {
@@ -2155,7 +2297,9 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
         ftSetExpire(&tair_hash_obj->hash, tair_hash_val, milliseconds);
     }
 
+    tair_hash_val->seq = tairHashNextSeq(now);
     replicateFieldState(ctx, argv[1], argv[2], value, tair_hash_val);
+    releaseOwnedKeyTtl(ctx, key, argv[1], tair_hash_obj);
     RedisModule_ReplyWithString(ctx, value);
     return REDISMODULE_OK;
 }
@@ -3083,16 +3227,881 @@ static tairHashObj *getOrCreateTairHash(RedisModuleCtx *ctx, RedisModuleKey *key
     return RedisModule_ModuleTypeGetValue(key);
 }
 
-/* EXHMSETREPL <key> <layout> <field> <value> <version> <expire> [...]
+/* ===================== Last-write-wins writes and source sync ===================== */
+
+/* The sync epoch: a hash is synced only while its synced_epoch is this, and never while it
+ * is 0. A master renews it when the module loads, after an RDB or AOF is loaded and when it
+ * is promoted, because each of those can lose writes that synced hashes reflected, and puts
+ * the renewal in the replication stream (EXHSYNCEPOCH). A replica's epoch is part of the
+ * data it replicates: it takes it from the aux data of an RDB it loads and from EXHSYNCEPOCH
+ * in the stream or its own AOF, so it has its master's as of the point of the stream it has
+ * applied, and none while it has yet to get it. */
+static long long g_sync_epoch = 0;
+
+/* The master's epoch is not in the replication stream yet. */
+static int g_sync_epoch_unannounced = 0;
+
+/* This node's data has held a synced hash, so a replica may hold one too and has to learn of
+ * a renewal at once. Until then a renewal is announced only ahead of the first synced hash,
+ * which keeps the stream of a master that never used the sync commands free of a command
+ * that TairHash 2.0 and 1.x do not know. */
+static int g_sync_state_seen = 0;
+
+static int g_sync_epoch_timer_armed = 0;
+
+/* The role the node had at the last role change, to tell a demoted master from a replica that
+ * only changes master. */
+static int g_sync_role_replica = 0;
+
+/* Module options lww_tombstone_ttl and sync_lease_ttl, in milliseconds. */
+static long long g_tombstone_ttl_ms = 3600 * 1000LL;
+static long long g_sync_lease_ttl_ms = 60 * 1000LL;
+
+/* Whether this node replicates another one. A cluster replica loads its data at startup
+ * before the cluster bus has given it the address of its master, which is when the server
+ * starts to report it as a replica. */
+static int nodeIsReplica(RedisModuleCtx *ctx) {
+    int flags = RedisModule_GetContextFlags(ctx);
+    if (flags & REDISMODULE_CTX_FLAGS_SLAVE) {
+        return 1;
+    }
+    if (!(flags & REDISMODULE_CTX_FLAGS_CLUSTER) || RedisModule_GetMyClusterID == NULL || RedisModule_GetClusterNodeInfo == NULL) {
+        return 0;
+    }
+    const char *myid = RedisModule_GetMyClusterID();
+    if (myid == NULL) {
+        return 0;
+    }
+    /* The server looks a node up by a terminated string, which its own ID is not. */
+    char id[REDISMODULE_NODE_ID_LEN + 1];
+    memcpy(id, myid, REDISMODULE_NODE_ID_LEN);
+    id[REDISMODULE_NODE_ID_LEN] = '\0';
+    int node_flags = 0;
+    return RedisModule_GetClusterNodeInfo(ctx, id, NULL, NULL, NULL, &node_flags) == REDISMODULE_OK && (node_flags & REDISMODULE_NODE_SLAVE) != 0;
+}
+
+/* Starts a new epoch on a master: a sequence, so it differs from every epoch this server has
+ * seen (tairHashObserveSeq). */
+static void renewSyncEpoch(void) {
+    g_sync_epoch = tairHashNextSeq(seqClockNow());
+    g_sync_epoch_unannounced = 1;
+}
+
+/* Takes the epoch of the data a replica loads or applies. */
+static void adoptSyncEpoch(RedisModuleCtx *ctx, long long epoch) {
+    tairHashObserveSeq(epoch);
+    if (nodeIsReplica(ctx)) {
+        g_sync_epoch = epoch;
+    }
+}
+
+static void announceSyncEpochTimer(RedisModuleCtx *ctx, void *data);
+
+/* Announces the epoch from a timer. A server event can fire inside a command (REPLICAOF NO
+ * ONE, DEBUG RELOAD), and propagating there would make the server take that command for a
+ * write and propagate it as well; a timer runs outside any command. */
+static void announceSyncEpochSoon(RedisModuleCtx *ctx, mstime_t delay) {
+    if (!g_sync_epoch_timer_armed) {
+        g_sync_epoch_timer_armed = 1;
+        RedisModule_CreateTimer(ctx, delay, announceSyncEpochTimer, NULL);
+    }
+}
+
+/* Puts the master's epoch in the replication stream and the AOF, after everything propagated
+ * under the previous one: a replica that follows the stream, replays it from the backlog after
+ * a partial resync or receives it through another replica then ends at this epoch. */
+static void announceSyncEpoch(RedisModuleCtx *ctx) {
+    if (!g_sync_epoch_unannounced) {
+        return;
+    }
+    /* Nothing may be propagated while clients are paused. Write commands do not run then
+     * either, so no hash is synced in the new epoch before the retry announces it. */
+    if (RedisModule_AvoidReplicaTraffic && RedisModule_AvoidReplicaTraffic()) {
+        announceSyncEpochSoon(ctx, 100);
+        return;
+    }
+    if (RedisModule_Replicate(ctx, "EXHSYNCEPOCH", "l", g_sync_epoch) == REDISMODULE_OK) {
+        g_sync_epoch_unannounced = 0;
+    }
+}
+
+static void announceSyncEpochTimer(RedisModuleCtx *ctx, void *data) {
+    REDISMODULE_NOT_USED(data);
+    g_sync_epoch_timer_armed = 0;
+    if (!nodeIsReplica(ctx)) {
+        announceSyncEpoch(ctx);
+    }
+}
+
+static lwwState *lwwStateOf(tairHashObj *o) {
+    if (o->lww == NULL) {
+        o->lww = RedisModule_Calloc(1, sizeof(*o->lww));
+        ftInit(&o->lww->tombstones);
+    }
+    return o->lww;
+}
+
+static void lwwStateFree(lwwState *s) {
+    if (s) {
+        ftClear(&s->tombstones);
+        RedisModule_Free(s);
+    }
+}
+
+static int hashIsSynced(const tairHashObj *o) {
+    return o->lww != NULL && o->lww->synced_epoch != 0 && o->lww->synced_epoch == g_sync_epoch;
+}
+
+/* Whether the hash has a sync lease that has not ended at `now_ms`. */
+static int leaseActive(const lwwState *s, long long now_ms) {
+    return s != NULL && s->lease != 0 && now_ms < s->lease_deadline && s->lease_epoch == g_sync_epoch;
+}
+
+/* The epoch to persist and replicate: an old one means "not synced" and is written as 0. */
+static long long currentSyncedEpoch(const tairHashObj *o) {
+    return hashIsSynced(o) ? o->lww->synced_epoch : 0;
+}
+
+/* The tombstone of a field whose retention has not ended at `now_ms`; one that ended is
+ * dropped. Dropping is not replicated: each node drops its own by its clock, and the result
+ * of a write that a dropped tombstone no longer stops is replicated as usual. */
+static TairHashField *liveTombstone(tairHashObj *o, const char *name, size_t len, long long now_ms) {
+    if (o->lww == NULL || ftSize(&o->lww->tombstones) == 0) {
+        return NULL;
+    }
+    TairHashField *t = ftFind(&o->lww->tombstones, name, len);
+    if (t != NULL && t->expire <= now_ms) {
+        ftDelete(&o->lww->tombstones, name, len);
+        return NULL;
+    }
+    return t;
+}
+
+/* The delete version of a field's tombstone, or 0 if it has none. */
+static long long liveTombstoneVersion(tairHashObj *o, RedisModuleString *name) {
+    if (o->lww == NULL || ftSize(&o->lww->tombstones) == 0) {
+        return 0;
+    }
+    size_t len;
+    const char *ptr = RedisModule_StringPtrLen(name, &len);
+    TairHashField *t = liveTombstone(o, ptr, len, RedisModule_Milliseconds());
+    return t ? t->version : 0;
+}
+
+static void setTombstone(tairHashObj *o, const char *name, size_t len, long long version, long long deadline) {
+    lwwState *s = lwwStateOf(o);
+    TairHashField *t = ftFind(&s->tombstones, name, len);
+    if (t == NULL) {
+        t = fieldCreate(name, len, "", 0);
+        ftAdd(&s->tombstones, t);
+    }
+    t->version = version;
+    ftSetExpire(&s->tombstones, t, deadline);
+}
+
+/* Drops every tombstone whose retention ended at `now_ms`. */
+static void purgeTombstones(tairHashObj *o, long long now_ms);
+
+/* Drops the tombstones whose retention ended, once their count doubled since the last time
+ * or an eighth of the retention has passed: a hash that is never synced again must not keep
+ * them, and a sweep per write would make each write linear in the number of tombstones. */
+#define TOMBSTONE_PURGE_MIN 64
+static void maybePurgeTombstones(tairHashObj *o, long long now_ms) {
+    lwwState *s = o->lww;
+    if (s == NULL || ftSize(&s->tombstones) == 0 || (ftSize(&s->tombstones) < s->purge_at && now_ms < s->purge_due)) {
+        return;
+    }
+    purgeTombstones(o, now_ms);
+    s->purge_at = ftSize(&s->tombstones) * 2 > TOMBSTONE_PURGE_MIN ? ftSize(&s->tombstones) * 2 : TOMBSTONE_PURGE_MIN;
+    s->purge_due = now_ms + g_tombstone_ttl_ms / 8;
+}
+
+static void purgeTombstones(tairHashObj *o, long long now_ms) {
+    if (o->lww == NULL || ftSize(&o->lww->tombstones) == 0) {
+        return;
+    }
+    fieldTableIterator it;
+    TairHashField *t;
+    ftIterInit(&it, &o->lww->tombstones);
+    while ((t = ftIterNext(&it)) != NULL) {
+        if (t->expire <= now_ms) {
+            ftDelete(&o->lww->tombstones, fieldName(t), t->name_len);
+        }
+    }
+    ftIterRelease(&it);
+}
+
+/* Propagates a hash's sync state, creating the hash if needed. */
+static void replicateSyncState(RedisModuleCtx *ctx, RedisModuleString *keyname, tairHashObj *o) {
+    lwwState *s = lwwStateOf(o);
+    long long epoch = currentSyncedEpoch(o);
+    if (epoch != 0) {
+        /* A replica must have the epoch before a hash that is synced in it. */
+        g_sync_state_seen = 1;
+        announceSyncEpoch(ctx);
+    }
+    RedisModule_Replicate(ctx, "EXHSYNCREPL", "sll", keyname, epoch, (long long)s->owns_key_ttl);
+}
+
+/* Absolute expire time of the key in milliseconds, or REDISMODULE_NO_EXPIRE. */
+static long long keyExpireAt(RedisModuleKey *key, long long now_ms) {
+    long long ttl = RedisModule_GetExpire(key);
+    return ttl == REDISMODULE_NO_EXPIRE ? REDISMODULE_NO_EXPIRE : now_ms + ttl;
+}
+
+/* Sets the key's TTL to end at `deadline` (unix time in milliseconds) as a TTL the module
+ * owns, and propagates it. */
+static void setOwnedKeyTtl(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *keyname, tairHashObj *o, long long deadline) {
+    lwwState *s = lwwStateOf(o);
+    if (!s->owns_key_ttl) {
+        s->owns_key_ttl = 1;
+        /* First, so that the hash exists on a replica when the PEXPIREAT gets there. */
+        replicateSyncState(ctx, keyname, o);
+    }
+    long long ttl = deadline - RedisModule_Milliseconds();
+    RedisModule_SetExpire(key, ttl > 0 ? ttl : 1);
+    RedisModule_Replicate(ctx, "PEXPIREAT", "sl", keyname, deadline);
+}
+
+/* Removes a TTL the module owns once the hash has fields (see lwwState.owns_key_ttl). Called
+ * by every command that can add a field; a hash that never used the LWW commands pays one
+ * pointer test. */
+static void releaseOwnedKeyTtl(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *keyname, tairHashObj *o) {
+    lwwState *s = o->lww;
+    if (s == NULL || !s->owns_key_ttl || ftSize(&o->hash) == 0) {
+        return;
+    }
+    s->owns_key_ttl = 0;
+    RedisModule_SetExpire(key, REDISMODULE_NO_EXPIRE);
+    replicateSyncState(ctx, keyname, o);
+    RedisModule_Replicate(ctx, "PERSIST", "s", keyname);
+}
+
+/* Gives a hash that has tombstones but no fields a key TTL ending with its last tombstone,
+ * unless the key already has a TTL the module does not own. */
+static void expireWithTombstones(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *keyname, tairHashObj *o) {
+    lwwState *s = o->lww;
+    if (s == NULL || ftSize(&s->tombstones) == 0 || hashIsSynced(o)) {
+        return;
+    }
+    if (!s->owns_key_ttl && RedisModule_GetExpire(key) != REDISMODULE_NO_EXPIRE) {
+        return;
+    }
+    long long deadline = 0;
+    fieldTableIterator it;
+    TairHashField *t;
+    ftIterInitReadOnly(&it, &s->tombstones);
+    while ((t = ftIterNext(&it)) != NULL) {
+        if (t->expire > deadline) {
+            deadline = t->expire;
+        }
+    }
+    ftIterRelease(&it);
+    long long current = keyExpireAt(key, RedisModule_Milliseconds());
+    if (s->owns_key_ttl && current != REDISMODULE_NO_EXPIRE && current >= deadline) {
+        return;
+    }
+    setOwnedKeyTtl(ctx, key, keyname, o, deadline);
+}
+
+/* Whether a hash without fields stays for its LWW state (delEmptyTairHashIfNeeded): it holds
+ * tombstones, which it then expires with; it is a placeholder, which expires by itself; or a
+ * sync of it is open, which EXHSYNC must find, and it then expires when the lease ends, as a
+ * placeholder does, unless the key has a TTL already. */
+static int lwwKeepsEmptyHash(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *keyname, tairHashObj *o) {
+    lwwState *s = o->lww;
+    if (s == NULL) {
+        return 0;
+    }
+    if (ftSize(&s->tombstones) > 0) {
+        expireWithTombstones(ctx, key, keyname, o);
+        return 1;
+    }
+    if (s->owns_key_ttl) {
+        return 1;
+    }
+    if (!leaseActive(s, RedisModule_Milliseconds())) {
+        return 0;
+    }
+    if (RedisModule_GetExpire(key) == REDISMODULE_NO_EXPIRE) {
+        setOwnedKeyTtl(ctx, key, keyname, o, s->lease_deadline);
+    }
+    return 1;
+}
+
+/* Byte-wise order with a shorter prefix sorting first: the order Cassandra/Scylla use
+ * to break write-timestamp ties between cell values. */
+static int compareValues(RedisModuleString *a, const TairHashField *b) {
+    size_t alen, blen = b->value_len;
+    const char *aptr = RedisModule_StringPtrLen(a, &alen);
+    const char *bptr = fieldValue(b);
+    int cmp = memcmp(aptr, bptr, alen < blen ? alen : blen);
+    if (cmp != 0) {
+        return cmp;
+    }
+    return (alen > blen) - (alen < blen);
+}
+
+/* Rejects the command before it changes anything unless every version in argv[start..argc),
+ * the last of each group of `step` arguments, is a positive integer. */
+static int validateLwwVersions(RedisModuleCtx *ctx, RedisModuleString **argv, int start, int argc, int step) {
+    long long version;
+    for (int i = start; i < argc; i += step) {
+        if (RedisModule_StringToLongLong(argv[i + step - 1], &version) != REDISMODULE_OK || version <= 0) {
+            RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
+            return REDISMODULE_ERR;
+        }
+    }
+    return REDISMODULE_OK;
+}
+
+/* The field, unless it is absent or has expired; an expired field is deleted on a writable
+ * master, as fieldExpireIfNeeded does. */
+static TairHashField *liveFieldForWrite(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *name) {
+    TairHashField *f = fieldLookup(o, name);
+    if (f != NULL && f->expire != 0 && fieldExpireIfNeeded(ctx, dbid, key, o, name, 0)) {
+        /* Gone on a master; a writable replica keeps it until the master's EXHDEL. */
+        f = fieldLookup(o, name);
+    }
+    return f;
+}
+
+/* Applies one last-write-wins write and returns 1 if it landed: the field is absent and no
+ * tombstone holds the same or a higher version, the field's version is lower, or the
+ * versions tie and the value is byte-wise greater. The tie-break makes the result
+ * independent of arrival order. A landed write clears the field's TTL, as EXHSET does, and
+ * is added to `batch` for replication. */
+static int lwwApply(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *name, RedisModuleString *value,
+                    long long version, long long now, long long now_ms, FieldStateBatch *batch) {
+    TairHashField *f = liveFieldForWrite(ctx, dbid, key, o, name);
+    if (f != NULL) {
+        if (version < f->version || (version == f->version && compareValues(value, f) <= 0)) {
+            return 0;
+        }
+        setFieldExpire(ctx, dbid, key, o, name, f, 0);
+        f = fieldSetValue(o, f, value);
+    } else {
+        size_t len;
+        const char *ptr = RedisModule_StringPtrLen(name, &len);
+        TairHashField *t = liveTombstone(o, ptr, len, now_ms);
+        if (t != NULL && version <= t->version) {
+            return 0;
+        }
+        f = fieldInsert(o, name, value); /* drops the tombstone */
+    }
+
+    f->version = version;
+    f->seq = tairHashNextSeq(now);
+    fieldStateBatchAdd(batch, name, value, f);
+    return 1;
+}
+
+/* EXHMSETLWW <key> <field> <value> <version> [<field> <value> <version> ...]
+ *
+ * Reply: one integer per triple, 1 if the write landed and 0 if the field already held
+ * a newer (or tie-winning) write or was deleted at the same or a higher version. A losing
+ * write is an expected outcome of last-write-wins, not an error, so it never fails a
+ * pipeline or a MULTI. */
+int TairHashTypeHmsetLww_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    RedisModule_AutoMemory(ctx);
+
+    if (argc < 5 || (argc - 2) % 3 != 0) {
+        return RedisModule_WrongArity(ctx);
+    }
+
+    /* Read before any key or field lookup: the clock read serializes the pipeline
+     * (ISB on arm64, lfence/rdtscp on x86), stalling on any cache miss still in flight. */
+    long long now = seqClockNow();
+    if (validateLwwVersions(ctx, argv, 2, argc, 3) != REDISMODULE_OK || !fieldArgsFit(ctx, argv, 2, argc, 3, 1)) {
+        return REDISMODULE_ERR;
+    }
+
+    int dbid = RedisModule_GetSelectedDb(ctx);
+    RedisModuleKey *key = openKeyAfterPassiveExpire(ctx, dbid, argv[1]);
+    tairHashObj *o = getOrCreateTairHash(ctx, key, argv[1]);
+    if (o == NULL) {
+        return REDISMODULE_ERR;
+    }
+
+    long long version, now_ms = RedisModule_Milliseconds();
+    FieldStateBatch batch;
+    fieldStateBatchInit(&batch, ctx, argv[1], (argc - 2) / 3);
+    /* Last-write-wins state includes the write sequence, which only the state format
+     * carries, and no TairHash version without these commands could apply them. */
+    batch.format = REPLICATION_FORMAT_STATE;
+    RedisModule_ReplyWithArray(ctx, (argc - 2) / 3);
+    for (int i = 2; i < argc; i += 3) {
+        RedisModule_StringToLongLong(argv[i + 2], &version);
+        RedisModule_ReplyWithLongLong(ctx, lwwApply(ctx, dbid, argv[1], o, argv[i], argv[i + 1], version, now, now_ms, &batch));
+    }
+    fieldStateBatchFlush(&batch);
+    maybePurgeTombstones(o, now_ms);
+    releaseOwnedKeyTtl(ctx, key, argv[1], o);
+    /* Every write lost to a tombstone in a hash created for them: leave nothing behind. */
+    delEmptyTairHashIfNeeded(ctx, key, argv[1], o);
+    return REDISMODULE_OK;
+}
+
+/* Fields per propagated EXHTOMBREPL, as for EXHMSETREPL. */
+#define TOMBSTONE_FIELDS_PER_CMD 8192
+/* EXHTOMBREPL <key> <layout> <field> <version> <deadline> [...]: layout 1. */
+#define TOMBSTONE_LAYOUT 1
+#define TOMBSTONE_ARGS 3
+
+/* EXHDELLWW <key> <field> <version> [<field> <version> ...]
+ *
+ * Deletes each field unless it holds a write with a higher version, and leaves a tombstone
+ * that writes and EXHSYNC snapshot entries with the same or a lower version lose to, until
+ * lww_tombstone_ttl has passed. A hash left with only tombstones expires with them.
+ *
+ * Reply: one integer per pair, 1 if the field is deleted at that version (now or by an
+ * earlier delete with the same or a higher version) and 0 if a newer write keeps it. */
+int TairHashTypeHdelLww_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    RedisModule_AutoMemory(ctx);
+
+    if (argc < 4 || (argc - 2) % 2 != 0) {
+        return RedisModule_WrongArity(ctx);
+    }
+    if (validateLwwVersions(ctx, argv, 2, argc, 2) != REDISMODULE_OK || !fieldArgsFit(ctx, argv, 2, argc, 2, 0)) {
+        return REDISMODULE_ERR;
+    }
+
+    int dbid = RedisModule_GetSelectedDb(ctx);
+    RedisModuleKey *key = openKeyAfterPassiveExpire(ctx, dbid, argv[1]);
+    tairHashObj *o = getOrCreateTairHash(ctx, key, argv[1]);
+    if (o == NULL) {
+        return REDISMODULE_ERR;
+    }
+
+    long long version, now_ms = RedisModule_Milliseconds(), deadline = now_ms + g_tombstone_ttl_ms;
+    int pairs = (argc - 2) / 2, applied = 0;
+    /* Arguments of the EXHTOMBREPL that propagates the deletes, field j at 2 + 3j. */
+    RedisModuleString **repl = RedisModule_Alloc(sizeof(*repl) * (2 + TOMBSTONE_ARGS * pairs));
+    RedisModuleString *deadline_str = RedisModule_CreateStringFromLongLong(ctx, deadline);
+    RedisModule_ReplyWithArray(ctx, pairs);
+    for (int i = 2; i < argc; i += 2) {
+        RedisModule_StringToLongLong(argv[i + 1], &version);
+        size_t len;
+        const char *ptr = RedisModule_StringPtrLen(argv[i], &len);
+        TairHashField *f = liveFieldForWrite(ctx, dbid, argv[1], o, argv[i]);
+        if (f != NULL && version < f->version) {
+            RedisModule_ReplyWithLongLong(ctx, 0);
+            continue;
+        }
+        TairHashField *t = f == NULL ? liveTombstone(o, ptr, len, now_ms) : NULL;
+        if (t != NULL && version <= t->version) {
+            RedisModule_ReplyWithLongLong(ctx, 1);
+            continue;
+        }
+        if (f != NULL) {
+            if (f->expire) {
+                g_expire_algorithm.delete(ctx, dbid, argv[1], o, argv[i], f->expire);
+            }
+            ftDelete(&o->hash, ptr, len);
+        }
+        setTombstone(o, ptr, len, version, deadline);
+        repl[2 + TOMBSTONE_ARGS * applied] = argv[i];
+        repl[2 + TOMBSTONE_ARGS * applied + 1] = argv[i + 1];
+        repl[2 + TOMBSTONE_ARGS * applied + 2] = deadline_str;
+        applied++;
+        RedisModule_ReplyWithLongLong(ctx, 1);
+    }
+    if (applied) {
+        RedisModuleString *layout = RedisModule_CreateStringFromLongLong(ctx, TOMBSTONE_LAYOUT);
+        for (int first = 0; first < applied; first += TOMBSTONE_FIELDS_PER_CMD) {
+            int n = applied - first < TOMBSTONE_FIELDS_PER_CMD ? applied - first : TOMBSTONE_FIELDS_PER_CMD;
+            /* A later part's key and layout overwrite the end of the part before it, which
+             * has been propagated already. */
+            RedisModuleString **a = repl + TOMBSTONE_ARGS * first;
+            a[0] = argv[1];
+            a[1] = layout;
+            RedisModule_Replicate(ctx, "EXHTOMBREPL", "v", a, (size_t)(2 + TOMBSTONE_ARGS * n));
+        }
+    }
+    RedisModule_Free(repl);
+    maybePurgeTombstones(o, now_ms);
+    if (ftSize(&o->hash) == 0) {
+        expireWithTombstones(ctx, key, argv[1], o);
+    }
+    return REDISMODULE_OK;
+}
+
+/* EXHSYNCGET <key> [<field> ...]
+ *
+ * Reply: [synced, [field, value, version, ...]]. Entries are returned only when the hash
+ * is synced in the current sync epoch (an authoritative copy, see EXHSYNC); otherwise the
+ * caller reads the source of truth inside EXHSYNCBEGIN and EXHSYNC. With fields given,
+ * only those that exist are returned. */
+int TairHashTypeSyncGet_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    RedisModule_AutoMemory(ctx);
+
+    if (argc < 2) {
+        return RedisModule_WrongArity(ctx);
+    }
+
+    RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ);
+    int expired = 0;
+    int type = RedisModule_KeyType(key);
+    if (type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(key) != TairHashType) {
+        RedisModule_ReplyWithError(ctx, REDISMODULE_ERRORMSG_WRONGTYPE);
+        return REDISMODULE_ERR;
+    }
+    tairHashObj *o = type == REDISMODULE_KEYTYPE_EMPTY ? NULL : RedisModule_ModuleTypeGetValue(key);
+
+    RedisModule_ReplyWithArray(ctx, 2);
+    if (o == NULL || !hashIsSynced(o)) {
+        RedisModule_ReplyWithLongLong(ctx, 0);
+        RedisModule_ReplyWithArray(ctx, 0);
+        /* A hash that was synced without fields in an earlier epoch holds nothing now, and
+         * nothing else would ever remove it. */
+        if (o != NULL && ftSize(&o->hash) == 0 && !isReadOnlyStatus(ctx)) {
+            RedisModule_CloseKey(key);
+            delEmptyTairHashIfNeeded(ctx, NULL, argv[1], o);
+        }
+        return REDISMODULE_OK;
+    }
+    RedisModule_ReplyWithLongLong(ctx, 1);
+
+    int dbid = RedisModule_GetSelectedDb(ctx);
+    long len = 0;
+    TairHashField *val;
+    /* For a full read without expiring fields nothing is filtered out, so the length is known up front
+     * and the reply avoids a deferred length (an extra reply-list node per read). Once that length
+     * is sent every field follows: none is checked against its expire. */
+    int exact = argc == 2 && ftExpiring(&o->hash) == 0;
+    RedisModule_ReplyWithArray(ctx, exact ? (long)ftSize(&o->hash) * 3 : REDISMODULE_POSTPONED_ARRAY_LEN);
+    if (argc == 2) {
+        fieldTableIterator it;
+        long long now = RedisModule_Milliseconds();
+        fullReadIterInit(&it, o);
+        while ((val = ftIterNext(&it)) != NULL) {
+            if (!exact && fullReadSkips(ctx, &expired, dbid, argv[1], o, val, now)) {
+                continue;
+            }
+            replyWithFieldName(ctx, val);
+            replyWithFieldValue(ctx, val);
+            RedisModule_ReplyWithLongLong(ctx, val->version);
+            len += 3;
+        }
+        ftIterRelease(&it);
+    } else {
+        for (int i = 2; i < argc; i++) {
+            val = fieldLookup(o, argv[i]);
+            if (val == NULL || (val->expire && readExpireIfNeeded(ctx, &expired, dbid, argv[1], o, argv[i]))) {
+                continue;
+            }
+            RedisModule_ReplyWithString(ctx, argv[i]);
+            replyWithFieldValue(ctx, val);
+            RedisModule_ReplyWithLongLong(ctx, val->version);
+            len += 3;
+        }
+    }
+    if (!exact) {
+        RedisModule_ReplySetArrayLength(ctx, len);
+    }
+    finishRead(ctx, key, argv[1], o, expired);
+    return REDISMODULE_OK;
+}
+
+/* EXHSYNCBEGIN <key>
+ *
+ * Opens a sync of the hash with the source of truth and replies its token: read the source
+ * after this call and hand the snapshot and the token to EXHSYNC. The token is valid for
+ * sync_lease_ttl, until EXHSYNC uses it or until the key goes away, and concurrent syncs of a
+ * hash share it. A
+ * missing key is created as an empty, unsynced placeholder with a TTL of sync_lease_ttl, so
+ * that an abandoned sync does not leave it behind; a write that adds a field, or EXHSYNC,
+ * removes that TTL. */
+int TairHashTypeSyncBegin_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    RedisModule_AutoMemory(ctx);
+
+    if (argc != 2) {
+        return RedisModule_WrongArity(ctx);
+    }
+    long long now = seqClockNow(), now_ms = RedisModule_Milliseconds();
+
+    RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
+    tairHashObj *o = getOrCreateTairHash(ctx, key, argv[1]);
+    if (o == NULL) {
+        return REDISMODULE_ERR;
+    }
+    lwwState *s = lwwStateOf(o);
+    if (!leaseActive(s, now_ms)) {
+        /* Every write after this sorts above the token. */
+        s->lease = tairHashNextSeq(now);
+        s->lease_deadline = now_ms + g_sync_lease_ttl_ms;
+        s->lease_epoch = g_sync_epoch;
+    }
+    /* A hash without fields that is not synced is here only for this sync and for its
+     * tombstones: a new one, or one that lost its sync with an earlier epoch. It must not stay
+     * behind if the sync is abandoned, so it lives as long as the lease and the tombstones,
+     * unless the key has a TTL of its own. */
+    if (ftSize(&o->hash) == 0 && !hashIsSynced(o)) {
+        expireWithTombstones(ctx, key, argv[1], o);
+        long long current = keyExpireAt(key, now_ms);
+        if (current == REDISMODULE_NO_EXPIRE || (s->owns_key_ttl && current < s->lease_deadline)) {
+            setOwnedKeyTtl(ctx, key, argv[1], o, s->lease_deadline);
+        }
+    }
+    RedisModule_ReplyWithLongLong(ctx, s->lease);
+    return REDISMODULE_OK;
+}
+
+/* EXHSYNC <key> <token> [<field> <value> <version> ...]
+ *
+ * Completes the sync EXHSYNCBEGIN opened with `token`, using a full snapshot of the source
+ * of truth read after that call: snapshot fields are merged with last-write-wins
+ * (EXHMSETLWW semantics, tombstones included), fields absent from the snapshot are removed
+ * unless they were written after the token (those raced the snapshot read), and the hash is
+ * marked synced in the current epoch. An empty snapshot leaves an empty, synced hash: "the
+ * source has nothing" is a cacheable answer. Fails, changing nothing, unless the hash still
+ * holds that token's lease: the lease ended, the key went away or another sync completed in
+ * the meantime.
+ *
+ * Reply: [applied, removed]. */
+int TairHashTypeSync_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    RedisModule_AutoMemory(ctx);
+
+    if (argc < 3 || (argc - 3) % 3 != 0) {
+        return RedisModule_WrongArity(ctx);
+    }
+
+    /* Read before any key or field lookup: the clock read serializes the pipeline
+     * (ISB on arm64, lfence/rdtscp on x86), stalling on any cache miss still in flight. */
+    long long now = seqClockNow();
+
+    long long token;
+    if (RedisModule_StringToLongLong(argv[2], &token) != REDISMODULE_OK || token <= 0) {
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNTAX);
+        return REDISMODULE_ERR;
+    }
+    if (validateLwwVersions(ctx, argv, 3, argc, 3) != REDISMODULE_OK || !fieldArgsFit(ctx, argv, 3, argc, 3, 1)) {
+        return REDISMODULE_ERR;
+    }
+
+    int dbid = RedisModule_GetSelectedDb(ctx);
+    RedisModuleKey *key = openKeyAfterPassiveExpire(ctx, dbid, argv[1]);
+    int type = RedisModule_KeyType(key);
+    if (type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(key) != TairHashType) {
+        RedisModule_ReplyWithError(ctx, REDISMODULE_ERRORMSG_WRONGTYPE);
+        return REDISMODULE_ERR;
+    }
+    tairHashObj *o = type == REDISMODULE_KEYTYPE_EMPTY ? NULL : RedisModule_ModuleTypeGetValue(key);
+    long long now_ms = RedisModule_Milliseconds();
+    if (o == NULL || !leaseActive(o->lww, now_ms) || o->lww->lease != token) {
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_SYNC_LEASE);
+        return REDISMODULE_ERR;
+    }
+    lwwState *s = o->lww;
+
+    long long applied = 0, removed = 0, version;
+    purgeTombstones(o, now_ms);
+    /* The snapshot's field names, as value-less fields, to test membership by bytes. */
+    fieldTable snapshot;
+    ftInit(&snapshot);
+    FieldStateBatch batch;
+    fieldStateBatchInit(&batch, ctx, argv[1], (argc - 3) / 3);
+    /* Last-write-wins state includes the write sequence, which only the state format
+     * carries, and no TairHash version without these commands could apply them. */
+    batch.format = REPLICATION_FORMAT_STATE;
+    for (int i = 3; i < argc; i += 3) {
+        RedisModule_StringToLongLong(argv[i + 2], &version);
+        applied += lwwApply(ctx, dbid, argv[1], o, argv[i], argv[i + 1], version, now, now_ms, &batch);
+        size_t name_len;
+        const char *name_ptr = RedisModule_StringPtrLen(argv[i], &name_len);
+        if (ftFind(&snapshot, name_ptr, name_len) == NULL) {
+            ftAdd(&snapshot, fieldCreate(name_ptr, name_len, "", 0));
+        }
+    }
+    fieldStateBatchFlush(&batch);
+
+    /* Marked synced before the removals are propagated: replaying them must not find an
+     * unsynced hash that they empty, which would delete the key and its TTL. */
+    int owned_ttl = s->owns_key_ttl;
+    s->synced_epoch = g_sync_epoch;
+    s->lease = 0;
+    s->owns_key_ttl = 0;
+    replicateSyncState(ctx, argv[1], o);
+    if (owned_ttl) {
+        RedisModule_SetExpire(key, REDISMODULE_NO_EXPIRE);
+        RedisModule_Replicate(ctx, "PERSIST", "s", argv[1]);
+    }
+
+    /* Fields absent from the snapshot are gone from the source, unless they were written
+     * after the token, while the snapshot was being read; they are propagated as one EXHDEL. */
+    if (ftSize(&o->hash) > 0) {
+        size_t cap = 1 + ftSize(&o->hash), ndel = 0;
+        RedisModuleString **del = RedisModule_Alloc(sizeof(*del) * cap);
+        del[ndel++] = argv[1];
+        fieldTableIterator it;
+        TairHashField *f;
+        ftIterInit(&it, &o->hash);
+        while ((f = ftIterNext(&it)) != NULL) {
+            if (f->seq > token || ftFind(&snapshot, fieldName(f), f->name_len) != NULL) {
+                continue;
+            }
+            /* Outlives the field deleted below. */
+            RedisModuleString *name = RedisModule_CreateString(NULL, fieldName(f), f->name_len);
+            if (f->expire) {
+                g_expire_algorithm.delete(ctx, dbid, argv[1], o, name, f->expire);
+            }
+            ftDelete(&o->hash, fieldName(f), f->name_len);
+            del[ndel++] = name;
+            removed++;
+        }
+        ftIterRelease(&it);
+        if (ndel > 1) {
+            RedisModule_Replicate(ctx, "EXHDEL", "v", del, ndel);
+        }
+        for (size_t i = 1; i < ndel; i++) {
+            RedisModule_FreeString(NULL, del[i]);
+        }
+        RedisModule_Free(del);
+    }
+    ftClear(&snapshot);
+
+    RedisModule_ReplyWithArray(ctx, 2);
+    RedisModule_ReplyWithLongLong(ctx, applied);
+    RedisModule_ReplyWithLongLong(ctx, removed);
+    return REDISMODULE_OK;
+}
+
+/* EXHSYNCREPL <key> <synced_epoch> <owns_key_ttl>
+ *
+ * Internal: sets the sync state of <key>, creating an empty hash if needed. Emitted by the
+ * sync commands and EXHDELLWW for replicas and the AOF, and by AOF rewrite; rejected from
+ * regular clients. The hash reads as synced where <synced_epoch> is the node's epoch, which a
+ * replica has from EXHSYNCEPOCH, not from here. */
+int TairHashTypeSyncRepl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    RedisModule_AutoMemory(ctx);
+
+    if (argc != 4) {
+        return RedisModule_WrongArity(ctx);
+    }
+    if (!mayRestoreState(ctx)) {
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_CMD);
+        return REDISMODULE_ERR;
+    }
+    long long epoch, owns;
+    /* The epoch is observed as a sequence, so it is bounded like one. */
+    if (RedisModule_StringToLongLong(argv[2], &epoch) != REDISMODULE_OK || epoch < 0 || epoch > TAIRHASH_SEQ_MAX ||
+        RedisModule_StringToLongLong(argv[3], &owns) != REDISMODULE_OK || (owns != 0 && owns != 1)) {
+        return rejectStateCommand(ctx, "EXHSYNCREPL", TAIRHASH_ERRORMSG_SYNTAX);
+    }
+
+    RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
+    tairHashObj *o = getOrCreateTairHash(ctx, key, argv[1]);
+    if (o == NULL) {
+        return REDISMODULE_ERR;
+    }
+    lwwState *s = lwwStateOf(o);
+    s->synced_epoch = epoch;
+    s->owns_key_ttl = (int)owns;
+    tairHashObserveSeq(epoch);
+    if (epoch != 0) {
+        g_sync_state_seen = 1;
+    }
+    RedisModule_ReplicateVerbatim(ctx);
+    RedisModule_ReplyWithSimpleString(ctx, "OK");
+    return REDISMODULE_OK;
+}
+
+/* EXHSYNCEPOCH <epoch>
+ *
+ * Internal: the master started sync epoch <epoch>. Emitted by a master that renewed its
+ * epoch; rejected from regular clients. A replica takes the epoch as its own, from the
+ * replication stream and when it replays its AOF; a master replaying its AOF does not, as it
+ * starts a new one after the load. */
+int TairHashTypeSyncEpoch_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    RedisModule_AutoMemory(ctx);
+
+    if (argc != 2) {
+        return RedisModule_WrongArity(ctx);
+    }
+    if (!mayRestoreState(ctx)) {
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_CMD);
+        return REDISMODULE_ERR;
+    }
+    long long epoch;
+    if (RedisModule_StringToLongLong(argv[1], &epoch) != REDISMODULE_OK || epoch <= 0 || epoch > TAIRHASH_SEQ_MAX) {
+        return rejectStateCommand(ctx, "EXHSYNCEPOCH", TAIRHASH_ERRORMSG_SYNTAX);
+    }
+    adoptSyncEpoch(ctx, epoch);
+    g_sync_state_seen = 1;
+    RedisModule_ReplicateVerbatim(ctx);
+    RedisModule_ReplyWithSimpleString(ctx, "OK");
+    return REDISMODULE_OK;
+}
+
+/* EXHTOMBREPL <key> <layout> <field> <version> <deadline> [...]
+ *
+ * Internal: deletes each field and sets its tombstone to the delete version and retention
+ * deadline the master decided, creating the hash if needed. Emitted by EXHDELLWW and AOF
+ * rewrite; rejected from regular clients. */
+int TairHashTypeTombRepl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    RedisModule_AutoMemory(ctx);
+
+    if (argc < 3 + TOMBSTONE_ARGS || (argc - 3) % TOMBSTONE_ARGS != 0) {
+        return RedisModule_WrongArity(ctx);
+    }
+    if (!mayRestoreState(ctx)) {
+        RedisModule_ReplyWithError(ctx, TAIRHASH_ERRORMSG_INTERNAL_CMD);
+        return REDISMODULE_ERR;
+    }
+    long long layout, version, deadline;
+    if (RedisModule_StringToLongLong(argv[2], &layout) != REDISMODULE_OK || layout != TOMBSTONE_LAYOUT) {
+        return rejectStateCommand(ctx, "EXHTOMBREPL", TAIRHASH_ERRORMSG_REPL_LAYOUT);
+    }
+    /* No delete leaves a negative version or deadline, and a field that replaces the tombstone
+     * starts at its version. */
+    for (int i = 3; i < argc; i += TOMBSTONE_ARGS) {
+        if (RedisModule_StringToLongLong(argv[i + 1], &version) != REDISMODULE_OK || RedisModule_StringToLongLong(argv[i + 2], &deadline) != REDISMODULE_OK ||
+            version < 0 || deadline < 0) {
+            return rejectStateCommand(ctx, "EXHTOMBREPL", TAIRHASH_ERRORMSG_SYNTAX);
+        }
+    }
+    if (!fieldArgsFit(ctx, argv, 3, argc, TOMBSTONE_ARGS, 0)) {
+        RedisModule_Log(ctx, "warning", "EXHTOMBREPL rejected, the write it carries is lost: %s", TAIRHASH_ERRORMSG_FIELD_TOO_LONG);
+        return REDISMODULE_ERR;
+    }
+
+    RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
+    tairHashObj *o = getOrCreateTairHash(ctx, key, argv[1]);
+    if (o == NULL) {
+        return REDISMODULE_ERR;
+    }
+    int dbid = RedisModule_GetSelectedDb(ctx);
+    for (int i = 3; i < argc; i += TOMBSTONE_ARGS) {
+        RedisModule_StringToLongLong(argv[i + 1], &version);
+        RedisModule_StringToLongLong(argv[i + 2], &deadline);
+        size_t len;
+        const char *ptr = RedisModule_StringPtrLen(argv[i], &len);
+        TairHashField *f = fieldLookup(o, argv[i]);
+        if (f != NULL) {
+            if (f->expire) {
+                g_expire_algorithm.delete(ctx, dbid, argv[1], o, argv[i], f->expire);
+            }
+            ftDelete(&o->hash, ptr, len);
+        }
+        setTombstone(o, ptr, len, version, deadline);
+    }
+    maybePurgeTombstones(o, RedisModule_Milliseconds());
+    RedisModule_ReplicateVerbatim(ctx);
+    RedisModule_ReplyWithSimpleString(ctx, "OK");
+    return REDISMODULE_OK;
+}
+
+/* EXHMSETREPL <key> <layout> <field> <value> <version> <expire> [<seq>] [...]
  *
  * Internal: sets each field to exactly the given state (expire is an absolute unix time
  * in milliseconds, 0 for none), creating the hash if needed. Emitted by write commands
  * and AOF rewrite in the state replication format; rejected from regular clients.
+ * Layout 1, from TairHash 2.0, carries no write sequence: this node assigns one.
  * Version 0 is accepted: fields written before EXHSETNX started at version 1 carry it. */
 int TairHashTypeHmsetRepl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
     RedisModule_AutoMemory(ctx);
 
-    if (argc < 3 + FIELD_STATE_ARGS || (argc - 3) % FIELD_STATE_ARGS != 0) {
+    if (argc < 3) {
         return RedisModule_WrongArity(ctx);
     }
     if (!mayRestoreState(ctx)) {
@@ -3100,20 +4109,25 @@ int TairHashTypeHmsetRepl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **
         return REDISMODULE_ERR;
     }
     long long layout;
-    if (RedisModule_StringToLongLong(argv[2], &layout) != REDISMODULE_OK || layout != FIELD_STATE_LAYOUT) {
+    if (RedisModule_StringToLongLong(argv[2], &layout) != REDISMODULE_OK || (layout != 1 && layout != FIELD_STATE_LAYOUT)) {
         return rejectStateCommand(ctx, "EXHMSETREPL", TAIRHASH_ERRORMSG_REPL_LAYOUT);
+    }
+    int nargs = layout == 1 ? FIELD_STATE_ARGS_LAYOUT_1 : FIELD_STATE_ARGS;
+    if (argc < 3 + nargs || (argc - 3) % nargs != 0) {
+        return RedisModule_WrongArity(ctx);
     }
 
     /* The master decided these values; they are restored as they are. No write leaves a
      * negative version or expire, and the expire indexes and EXHVER's replies rely on that. */
-    long long version, expire;
-    for (int i = 3; i < argc; i += FIELD_STATE_ARGS) {
+    long long version, expire, seq;
+    for (int i = 3; i < argc; i += nargs) {
         if (RedisModule_StringToLongLong(argv[i + 2], &version) != REDISMODULE_OK || RedisModule_StringToLongLong(argv[i + 3], &expire) != REDISMODULE_OK ||
-            version < 0 || expire < 0) {
+            version < 0 || expire < 0 ||
+            (nargs == FIELD_STATE_ARGS && (RedisModule_StringToLongLong(argv[i + 4], &seq) != REDISMODULE_OK || seq < 0 || seq > TAIRHASH_SEQ_MAX))) {
             return rejectStateCommand(ctx, "EXHMSETREPL", TAIRHASH_ERRORMSG_SYNTAX);
         }
     }
-    if (!fieldArgsFit(ctx, argv, 3, argc, FIELD_STATE_ARGS, 1)) {
+    if (!fieldArgsFit(ctx, argv, 3, argc, nargs, 1)) {
         RedisModule_Log(ctx, "warning", "EXHMSETREPL rejected, the write it carries is lost: %s", TAIRHASH_ERRORMSG_FIELD_TOO_LONG);
         return REDISMODULE_ERR;
     }
@@ -3125,11 +4139,18 @@ int TairHashTypeHmsetRepl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **
         return REDISMODULE_ERR;
     }
 
+    long long now = nargs == FIELD_STATE_ARGS ? 0 : seqClockNow();
     int dbid = RedisModule_GetSelectedDb(ctx);
-    for (int i = 3; i < argc; i += FIELD_STATE_ARGS) {
+    for (int i = 3; i < argc; i += nargs) {
         RedisModuleString *field = argv[i];
         RedisModule_StringToLongLong(argv[i + 2], &version);
         RedisModule_StringToLongLong(argv[i + 3], &expire);
+        if (nargs == FIELD_STATE_ARGS) {
+            RedisModule_StringToLongLong(argv[i + 4], &seq);
+            tairHashObserveSeq(seq);
+        } else {
+            seq = tairHashNextSeq(now);
+        }
 
         TairHashField *f = fieldLookup(o, field);
         if (f != NULL) {
@@ -3138,7 +4159,11 @@ int TairHashTypeHmsetRepl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **
             f = fieldInsert(o, field, argv[i + 1]);
         }
         f->version = version;
+        f->seq = seq;
         setFieldExpire(ctx, dbid, argv[1], o, field, f, expire);
+    }
+    if (o->lww && ftSize(&o->lww->tombstones)) {
+        maybePurgeTombstones(o, RedisModule_Milliseconds());
     }
 
     RedisModule_ReplicateVerbatim(ctx);
@@ -3213,6 +4238,14 @@ int TairHashTypeHmetaRepl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **
 
 /* ========================== "tairhashtype" type methods ======================= */
 
+
+/* Whether the value is read as part of a dataset the server is loading (an RDB file, the
+ * RDB of a full sync), rather than from the payload of a RESTORE. */
+static int loadingDataset(RedisModuleIO *rdb) {
+    RedisModuleCtx *ctx = RedisModule_GetContextFromIO ? RedisModule_GetContextFromIO(rdb) : NULL;
+    return ctx == NULL || (RedisModule_GetContextFlags(ctx) & REDISMODULE_CTX_FLAGS_LOADING) != 0;
+}
+
 void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
     if (encver > TAIRHASH_ENCVER) {
         RedisModule_LogIOError(rdb, "warning", "tairhash: unsupported encoding version %d (this module reads up to %d)", encver, TAIRHASH_ENCVER);
@@ -3231,6 +4264,47 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
     } else {
         o->key = saved_key;
     }
+    if (encver >= 1) {
+        uint64_t epoch = RedisModule_LoadUnsigned(rdb);
+        uint64_t owns = RedisModule_LoadUnsigned(rdb);
+        uint64_t tombstones = RedisModule_LoadUnsigned(rdb);
+        if (epoch > TAIRHASH_SEQ_MAX) {
+            RedisModule_LogIOError(rdb, "warning", "tairhash: a sync epoch is out of range, the value is corrupt");
+            tairHashTypeReleaseObject(o);
+            return NULL;
+        }
+        tairHashObserveSeq((long long)epoch);
+        /* A load restores the dataset as it was saved, a synced hash included. RESTORE does
+         * not: its payload can be older than writes the hash has taken since. */
+        if (epoch != 0 && !loadingDataset(rdb)) {
+            epoch = 0;
+        }
+        if (epoch || owns || tombstones) {
+            lwwState *s = lwwStateOf(o);
+            s->synced_epoch = (long long)epoch;
+            s->owns_key_ttl = owns != 0;
+            if (epoch != 0) {
+                g_sync_state_seen = 1;
+            }
+            if (tombstones) {
+                ftExpand(&s->tombstones, tombstones < TAIRHASH_RDB_PRESIZE_MAX ? tombstones : TAIRHASH_RDB_PRESIZE_MAX);
+            }
+            while (tombstones--) {
+                size_t name_len;
+                char *name = RedisModule_LoadStringBuffer(rdb, &name_len);
+                long long version = RedisModule_LoadUnsigned(rdb);
+                long long deadline = RedisModule_LoadUnsigned(rdb);
+                if (name_len > FT_NAME_MAX_LEN || ftFind(&s->tombstones, name, name_len) != NULL) {
+                    RedisModule_LogIOError(rdb, "warning", "tairhash: a tombstone is repeated or too long, the value is corrupt");
+                    RedisModule_Free(name);
+                    tairHashTypeReleaseObject(o);
+                    return NULL;
+                }
+                setTombstone(o, name, name_len, version, deadline);
+                RedisModule_Free(name);
+            }
+        }
+    }
     /* The count sizes the table, up to a bound: a corrupt count must not make it allocate
      * without limit before the first field is read. */
     if (len) {
@@ -3245,8 +4319,16 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
         long long version = RedisModule_LoadUnsigned(rdb);
         long long expire = RedisModule_LoadUnsigned(rdb);
         char *value = RedisModule_LoadStringBuffer(rdb, &value_len);
+        uint64_t seq = encver >= 1 ? RedisModule_LoadUnsigned(rdb) : 0;
         if (name_len > FT_NAME_MAX_LEN || value_len > FT_VALUE_MAX_LEN || ftFind(&o->hash, name, name_len) != NULL) {
             RedisModule_LogIOError(rdb, "warning", "tairhash: a field is repeated or too long, the value is corrupt");
+            RedisModule_Free(name);
+            RedisModule_Free(value);
+            tairHashTypeReleaseObject(o);
+            return NULL;
+        }
+        if (seq > TAIRHASH_SEQ_MAX) {
+            RedisModule_LogIOError(rdb, "warning", "tairhash: a write sequence is out of range, the value is corrupt");
             RedisModule_Free(name);
             RedisModule_Free(value);
             tairHashTypeReleaseObject(o);
@@ -3260,6 +4342,8 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
         TairHashField *f = fieldCreate(name, name_len, value, value_len);
         f->version = version;
         f->expire = expire;
+        f->seq = (long long)seq;
+        tairHashObserveSeq(f->seq);
         ftAdd(&o->hash, f);
         if (expire) {
             RedisModuleString *field = RedisModule_CreateString(NULL, name, name_len);
@@ -3278,6 +4362,34 @@ void TairHashTypeRdbSave(RedisModuleIO *rdb, void *value) {
 
     RedisModule_SaveUnsigned(rdb, ftSize(&o->hash));
     RedisModule_SaveString(rdb, o->key);
+    lwwState *s = o->lww;
+    RedisModule_SaveUnsigned(rdb, currentSyncedEpoch(o));
+    RedisModule_SaveUnsigned(rdb, s ? s->owns_key_ttl : 0);
+    /* Tombstones whose retention ended stay out of the file, and of a full sync: nothing may
+     * have dropped them from memory yet. The count comes first, hence the two passes. */
+    long long now = RedisModule_Milliseconds();
+    uint64_t tombstones = 0;
+    fieldTableIterator tit;
+    TairHashField *t;
+    if (s) {
+        ftIterInitReadOnly(&tit, &s->tombstones);
+        while ((t = ftIterNext(&tit)) != NULL) {
+            tombstones += t->expire > now;
+        }
+        ftIterRelease(&tit);
+    }
+    RedisModule_SaveUnsigned(rdb, tombstones);
+    if (tombstones) {
+        ftIterInitReadOnly(&tit, &s->tombstones);
+        while ((t = ftIterNext(&tit)) != NULL) {
+            if (t->expire > now) {
+                RedisModule_SaveStringBuffer(rdb, fieldName(t), t->name_len);
+                RedisModule_SaveUnsigned(rdb, t->version);
+                RedisModule_SaveUnsigned(rdb, t->expire);
+            }
+        }
+        ftIterRelease(&tit);
+    }
 
     fieldTableIterator it;
     TairHashField *f;
@@ -3287,6 +4399,7 @@ void TairHashTypeRdbSave(RedisModuleIO *rdb, void *value) {
         RedisModule_SaveUnsigned(rdb, f->version);
         RedisModule_SaveUnsigned(rdb, f->expire);
         RedisModule_SaveStringBuffer(rdb, fieldValue(f), f->value_len);
+        RedisModule_SaveUnsigned(rdb, f->seq);
     }
     ftIterRelease(&it);
 }
@@ -3296,9 +4409,10 @@ void TairHashTypeRdbSave(RedisModuleIO *rdb, void *value) {
  * huge command. */
 #define AOF_REWRITE_FIELDS_PER_CMD 64
 
-/* Emits one EXHMSETREPL and frees the field arguments (argv[0] and argv[1] are the caller's). */
-static void emitFieldStates(RedisModuleIO *aof, RedisModuleString **argv, int argc) {
-    RedisModule_EmitAOF(aof, "EXHMSETREPL", "v", argv, (size_t)argc);
+/* Emits one internal state command and frees its per-field arguments (argv[0] and argv[1],
+ * the key and the layout, are the caller's). */
+static void emitAofCommand(RedisModuleIO *aof, const char *command, RedisModuleString **argv, int argc) {
+    RedisModule_EmitAOF(aof, command, "v", argv, (size_t)argc);
     for (int i = 2; i < argc; i++) {
         if (argv[i] != g_zero_str) {
             RedisModule_FreeString(NULL, argv[i]);
@@ -3321,14 +4435,15 @@ static void aofRewriteState(RedisModuleIO *aof, RedisModuleString *key, tairHash
         argv[argc++] = RedisModule_CreateString(NULL, fieldValue(f), f->value_len);
         argv[argc++] = RedisModule_CreateStringFromLongLong(NULL, f->version);
         argv[argc++] = f->expire ? RedisModule_CreateStringFromLongLong(NULL, f->expire) : g_zero_str;
+        argv[argc++] = RedisModule_CreateStringFromLongLong(NULL, f->seq);
         if (argc == (int)(sizeof(argv) / sizeof(argv[0]))) {
-            emitFieldStates(aof, argv, argc);
+            emitAofCommand(aof, "EXHMSETREPL", argv, argc);
             argc = 2;
         }
     }
     ftIterRelease(&it);
     if (argc > 2) {
-        emitFieldStates(aof, argv, argc);
+        emitAofCommand(aof, "EXHMSETREPL", argv, argc);
     }
     RedisModule_FreeString(NULL, argv[0]);
 }
@@ -3354,10 +4469,55 @@ static void aofRewriteCompat(RedisModuleIO *aof, RedisModuleString *key, tairHas
     ftIterRelease(&it);
 }
 
+/* Emits a hash's sync state and live tombstones. No TairHash version without the LWW
+ * commands has either, so this does not depend on the replication format. */
+static void aofRewriteLww(RedisModuleIO *aof, RedisModuleString *key, tairHashObj *o) {
+    lwwState *s = o->lww;
+    if (s == NULL) {
+        return;
+    }
+    /* First, so that a hash without fields is recreated too. */
+    if (currentSyncedEpoch(o) || s->owns_key_ttl) {
+        RedisModule_EmitAOF(aof, "EXHSYNCREPL", "sll", key, currentSyncedEpoch(o), (long long)s->owns_key_ttl);
+    }
+    if (ftSize(&s->tombstones) == 0) {
+        return;
+    }
+    RedisModuleString *argv[2 + TOMBSTONE_ARGS * AOF_REWRITE_FIELDS_PER_CMD];
+    int argc = 2;
+    /* The server passes a stack-allocated key, which the "v" format would try to retain. */
+    argv[0] = RedisModule_CreateStringFromString(NULL, key);
+    argv[1] = RedisModule_CreateStringFromLongLong(NULL, TOMBSTONE_LAYOUT);
+    long long now = RedisModule_Milliseconds();
+    fieldTableIterator it;
+    TairHashField *t;
+    ftIterInitReadOnly(&it, &s->tombstones);
+    while ((t = ftIterNext(&it)) != NULL) {
+        if (t->expire <= now) {
+            continue;
+        }
+        argv[argc++] = RedisModule_CreateString(NULL, fieldName(t), t->name_len);
+        argv[argc++] = RedisModule_CreateStringFromLongLong(NULL, t->version);
+        argv[argc++] = RedisModule_CreateStringFromLongLong(NULL, t->expire);
+        if (argc == (int)(sizeof(argv) / sizeof(argv[0]))) {
+            emitAofCommand(aof, "EXHTOMBREPL", argv, argc);
+            argc = 2;
+        }
+    }
+    ftIterRelease(&it);
+    if (argc > 2) {
+        emitAofCommand(aof, "EXHTOMBREPL", argv, argc);
+    }
+    RedisModule_FreeString(NULL, argv[0]);
+    RedisModule_FreeString(NULL, argv[1]);
+}
+
 /* Emits every field, expired or not: the commands logged after the fork apply to the hash as
  * it was at the fork, where a field that expires while the rewrite runs still exists and may
  * since have had its TTL extended. Fields that did expire are removed after loading. */
 void TairHashTypeAofRewrite(RedisModuleIO *aof, RedisModuleString *key, void *value) {
+    tairHashObj *o = (tairHashObj *)value;
+    aofRewriteLww(aof, key, o);
     if (g_replication_format == REPLICATION_FORMAT_STATE) {
         aofRewriteState(aof, key, value);
     } else {
@@ -3398,6 +4558,9 @@ static size_t stringMallocSize(RedisModuleString *str) {
  * the names of expiring fields. */
 static size_t tairHashMemUsage(const tairHashObj *o) {
     size_t size = allocSize(o, sizeof(*o)) + ftMemUsage(&o->hash);
+    if (o->lww) {
+        size += allocSize(o->lww, sizeof(*o->lww)) + ftMemUsage(&o->lww->tombstones);
+    }
     if (o->key) {
         size += stringMallocSize(o->key);
     }
@@ -3450,6 +4613,7 @@ void *TairHashTypeCopy2(RedisModuleKeyOptCtx *ctx, const void *value) {
     int to_dbid = RedisModule_GetToDbIdFromOptCtx(ctx);
     const RedisModuleString *tokey = RedisModule_GetToKeyNameFromOptCtx(ctx);
 
+    /* The copy gets no LWW state: its sync and tombstones were about another key. */
     new->key = RedisModule_CreateStringFromString(NULL, tokey);
     ftExpand(&new->hash, ftSize(&old->hash));
 
@@ -3460,6 +4624,7 @@ void *TairHashTypeCopy2(RedisModuleKeyOptCtx *ctx, const void *value) {
         TairHashField *copy = fieldCreate(fieldName(f), f->name_len, fieldValue(f), f->value_len);
         copy->version = f->version;
         copy->expire = f->expire;
+        copy->seq = f->seq;
         ftAdd(&new->hash, copy);
         if (copy->expire) {
             RedisModuleString *field = RedisModule_CreateString(NULL, fieldName(f), f->name_len);
@@ -3495,7 +4660,9 @@ void TairHashTypeDigest(RedisModuleDigest *md, void *value) {
     }
 
     /* Everything replication and persistence must reproduce, so DEBUG DIGEST catches a
-     * replica or a reload that diverged in version or TTL too. */
+     * replica or a reload that diverged in version or TTL too. The write sequence is left out:
+     * the compat format and EXHMSETREPL layout 1 carry none, so each node assigns its own, and
+     * a node compares sequences only with the sync tokens it issued itself. */
     fieldTableIterator it;
     TairHashField *f;
     ftIterInitReadOnly(&it, &o->hash);
@@ -3508,7 +4675,87 @@ void TairHashTypeDigest(RedisModuleDigest *md, void *value) {
     }
     ftIterRelease(&it);
 
+    /* Tombstones are left out: each node drops expired ones by its own clock. */
+    RedisModule_DigestAddLongLong(md, currentSyncedEpoch(o));
+    RedisModule_DigestAddLongLong(md, o->lww ? o->lww->owns_key_ttl : 0);
     RedisModule_DigestEndSequence(md);
+
+    RedisModule_DigestEndSequence(md);
+}
+
+/* The sync epoch travels with the RDB: a replica takes the one its master had when it wrote the
+ * RDB of a full sync, and after a restart the one it had itself when it saved. */
+static void TairHashTypeAuxSave(RedisModuleIO *rdb, int when) {
+    REDISMODULE_NOT_USED(when);
+    RedisModule_SaveUnsigned(rdb, (uint64_t)g_sync_epoch);
+}
+
+static int TairHashTypeAuxLoad(RedisModuleIO *rdb, int encver, int when) {
+    REDISMODULE_NOT_USED(when);
+    if (encver > TAIRHASH_ENCVER) {
+        RedisModule_LogIOError(rdb, "warning", "tairhash: the RDB was written by a newer TairHash, encoding version %d", encver);
+        return REDISMODULE_ERR;
+    }
+    uint64_t epoch = RedisModule_LoadUnsigned(rdb);
+    if (RedisModule_IsIOError && RedisModule_IsIOError(rdb)) {
+        return REDISMODULE_ERR;
+    }
+    if (epoch > TAIRHASH_SEQ_MAX) {
+        RedisModule_LogIOError(rdb, "warning", "tairhash: the sync epoch is out of range, the RDB is corrupt");
+        return REDISMODULE_ERR;
+    }
+    RedisModuleCtx *ctx = RedisModule_GetContextFromIO ? RedisModule_GetContextFromIO(rdb) : NULL;
+    if (ctx) {
+        adoptSyncEpoch(ctx, (long long)epoch);
+    } else {
+        tairHashObserveSeq((long long)epoch);
+    }
+    return REDISMODULE_OK;
+}
+
+/* A replica takes the epoch of the data it loads, its master's dataset or its own files, and
+ * has none if they hold none. A master that loaded an RDB or an AOF in place of its dataset
+ * (a restart, DEBUG RELOAD, an older file) can have lost writes that synced hashes reflected:
+ * it starts a new epoch once the load is over, when it has seen every epoch in the file. */
+static void loadingSyncEpochCallback(RedisModuleCtx *ctx, RedisModuleEvent e, uint64_t sub, void *data) {
+    REDISMODULE_NOT_USED(e);
+    REDISMODULE_NOT_USED(data);
+    int replica = nodeIsReplica(ctx);
+    if (sub == REDISMODULE_SUBEVENT_LOADING_RDB_START || sub == REDISMODULE_SUBEVENT_LOADING_AOF_START ||
+        sub == REDISMODULE_SUBEVENT_LOADING_REPL_START) {
+        if (replica) {
+            g_sync_epoch = 0;
+        }
+    } else if ((sub == REDISMODULE_SUBEVENT_LOADING_ENDED || sub == REDISMODULE_SUBEVENT_LOADING_FAILED) && !replica) {
+        renewSyncEpoch();
+        if (g_sync_state_seen) {
+            announceSyncEpochSoon(ctx, 0);
+        }
+    }
+}
+
+/* A replica promoted to master may lack writes its old master had acknowledged. A master that
+ * becomes a replica has no epoch until it loads or applies its new master's, which a
+ * promoted master always sends it. A replica that only changes master keeps the epoch of the
+ * data it has: if the stream it continues holds no later one, that is still its epoch.
+ * Decided by the event rather than the context flags, which need not reflect the new role
+ * yet. */
+static void roleChangedSyncEpochCallback(RedisModuleCtx *ctx, RedisModuleEvent e, uint64_t sub, void *data) {
+    REDISMODULE_NOT_USED(e);
+    REDISMODULE_NOT_USED(data);
+    if (sub == REDISMODULE_EVENT_REPLROLECHANGED_NOW_MASTER) {
+        g_sync_role_replica = 0;
+        renewSyncEpoch();
+        if (g_sync_state_seen) {
+            announceSyncEpochSoon(ctx, 0);
+        }
+    } else {
+        if (!g_sync_role_replica) {
+            g_sync_epoch = 0;
+        }
+        g_sync_role_replica = 1;
+        g_sync_epoch_unannounced = 0;
+    }
 }
 
 int Module_CreateCommands(RedisModuleCtx *ctx) {
@@ -3543,6 +4790,19 @@ int Module_CreateCommands(RedisModuleCtx *ctx) {
     CREATE_WRCMD("exhpersist", TairHashTypeHpersist_RedisCommand)
     CREATE_WRCMD("exhmsetrepl", TairHashTypeHmsetRepl_RedisCommand)
     CREATE_WRCMD("exhmetarepl", TairHashTypeHmetaRepl_RedisCommand)
+    CREATE_WRCMD("exhmsetlww", TairHashTypeHmsetLww_RedisCommand)
+    CREATE_WRCMD("exhdellww", TairHashTypeHdelLww_RedisCommand)
+    /* A synced hash is only as good as the epoch, which needs the loading and role change
+     * events (Redis 6.0+) to be renewed; without them the sync commands are left out. */
+    if (RedisModule_SubscribeToServerEvent) {
+        CREATE_WRCMD("exhsyncbegin", TairHashTypeSyncBegin_RedisCommand)
+        CREATE_WRCMD("exhsync", TairHashTypeSync_RedisCommand)
+        /* O(N) without a field list, so not "fast". */
+        CREATE_CMD("exhsyncget", TairHashTypeSyncGet_RedisCommand, "readonly", 1, 1, 1)
+    }
+    CREATE_WRCMD("exhsyncrepl", TairHashTypeSyncRepl_RedisCommand)
+    CREATE_CMD("exhsyncepoch", TairHashTypeSyncEpoch_RedisCommand, "write", 0, 0, 0)
+    CREATE_WRCMD("exhtombrepl", TairHashTypeTombRepl_RedisCommand)
 
     /* readonly cmds */
     CREATE_ROCMD("exhget", TairHashTypeHget_RedisCommand)
@@ -3714,6 +4974,18 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
                 return REDISMODULE_ERR;
             }
             g_expire_algorithm.keys_per_passive_loop = v;
+        } else if (!mstrcasecmp(argv[ii], "lww_tombstone_ttl") || !mstrcasecmp(argv[ii], "sync_lease_ttl")) {
+            long long v;
+            if (RedisModule_StringToLongLong(argv[ii + 1], &v) == REDISMODULE_ERR || v <= 0 || v > TAIRHASH_RETENTION_MAX_SEC) {
+                RedisModule_Log(ctx, "warning", "Invalid argument for %s: expected a number of seconds from 1 to %lld",
+                                RedisModule_StringPtrLen(argv[ii], NULL), (long long)TAIRHASH_RETENTION_MAX_SEC);
+                return REDISMODULE_ERR;
+            }
+            if (!mstrcasecmp(argv[ii], "lww_tombstone_ttl")) {
+                g_tombstone_ttl_ms = v * 1000;
+            } else {
+                g_sync_lease_ttl_ms = v * 1000;
+            }
         } else if (!mstrcasecmp(argv[ii], "replication_format")) {
             if (parseReplicationFormat(argv[ii + 1], &g_replication_format) != REDISMODULE_OK) {
                 RedisModule_Log(ctx, "warning", "Invalid argument for replication_format: expected state or compat");
@@ -3724,12 +4996,22 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
             return REDISMODULE_ERR;
         }
     }
+    /* A sync must not accept a snapshot read before a delete once the delete's tombstone is
+     * gone: the tombstone has to outlive any lease that was open when it was set. */
+    if (g_tombstone_ttl_ms < g_sync_lease_ttl_ms) {
+        RedisModule_Log(ctx, "warning", "Invalid arguments: lww_tombstone_ttl (%lld) must not be shorter than sync_lease_ttl (%lld)",
+                        g_tombstone_ttl_ms / 1000, g_sync_lease_ttl_ms / 1000);
+        return REDISMODULE_ERR;
+    }
 
     RedisModuleTypeMethods tm = {
         .version = REDISMODULE_TYPE_METHOD_VERSION,
         .rdb_load = TairHashTypeRdbLoad,
         .rdb_save = TairHashTypeRdbSave,
         .aof_rewrite = TairHashTypeAofRewrite,
+        .aux_load = TairHashTypeAuxLoad,
+        .aux_save = TairHashTypeAuxSave,
+        .aux_save_triggers = REDISMODULE_AUX_BEFORE_RDB,
         .free = TairHashTypeFree,
         .digest = TairHashTypeDigest,
 #if defined(SORT_MODE) || defined(SLAB_MODE)
@@ -3750,6 +5032,9 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
     ftModuleInit();
     if (RedisModule_GetApi("RedisModule_MallocSizeString", (void **)&g_malloc_size_string) != REDISMODULE_OK) {
         g_malloc_size_string = NULL;
+    }
+    if (RedisModule_GetApi("RedisModule_CachedMicroseconds", (void **)&g_cached_microseconds) != REDISMODULE_OK) {
+        g_cached_microseconds = NULL;
     }
     g_layout_str = RedisModule_CreateStringFromLongLong(NULL, FIELD_STATE_LAYOUT);
     g_zero_str = RedisModule_CreateString(NULL, "0", 1);
@@ -3772,6 +5057,15 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
     g_expire_algorithm.db_num = serverDbCount();
     g_expire_algorithm.stat_active_expired_field = RedisModule_Calloc(g_expire_algorithm.db_num, sizeof(uint64_t));
     g_expire_algorithm.stat_passive_expired_field = RedisModule_Calloc(g_expire_algorithm.db_num, sizeof(uint64_t));
+
+    g_sync_role_replica = nodeIsReplica(ctx);
+    if (!g_sync_role_replica) {
+        renewSyncEpoch();
+    }
+    if (RedisModule_SubscribeToServerEvent) {
+        RedisModule_SubscribeToServerEvent(ctx, RedisModuleEvent_Loading, loadingSyncEpochCallback);
+        RedisModule_SubscribeToServerEvent(ctx, RedisModuleEvent_ReplicationRoleChanged, roleChangedSyncEpochCallback);
+    }
 
 #if defined(SORT_MODE) || defined(SLAB_MODE)
     g_expire_index = RedisModule_Calloc(g_expire_algorithm.db_num, sizeof(*g_expire_index));

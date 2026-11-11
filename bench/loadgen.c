@@ -6,20 +6,30 @@
  *           [-n ops] [-P pipeline] [-v value_len] [-s stale_pct] [-t ttl] [-S seed]
  *
  * Population workloads write every field of every key once, in key order:
+ *   load        EXHSYNCBEGIN, then EXHSYNC with a full snapshot (keys end up synced)
  *   loadset     EXHSET ... ABS <version> per field (with EX <ttl> when -t is given)
  *   loadmset    EXHMSET with every field of a key
  *   loadhset    native HSET with an 8-byte version prefix on each value: the memory
  *               baseline for the same data in a plain hash
  *
  * Steady-state workloads pick a random key (and fields) per op:
- *   gt          EXHSET ... GT <version> of one field (with EX <ttl> when -t is given);
- *               `stale_pct`% of ops carry version 1, which is older than any field, and
+ *   lww         EXHMSETLWW of one field; `stale_pct`% of ops carry version 1, which is
+ *               older than any field, and lose
+ *   gt          EXHSET ... GT <version> of one field (with EX <ttl> when -t is given), the
+ *               request shape EXHMSETLWW replaces; `stale_pct`% of ops carry version 1 and
  *               get an error reply
  *   mset        EXHMSET of `fields_per_write` distinct random fields
- *   getallver   EXHGETALLWITHVER of a whole key
+ *   getallver   EXHGETALLWITHVER of a whole key, the read EXHSYNCGET replaces
+ *   syncget     EXHSYNCGET of a whole key
+ *   sync        EXHSYNCGET and EXHSYNCBEGIN, then EXHSYNC with a full snapshot (the
+ *               read-repair path)
  *
- * Prints throughput, the number of error replies and of full reads that found no key. Error
- * replies are counted; they fail a population run (load*) only.
+ * load and sync take two pipelined round trips per batch, as a client does: the first opens
+ * the syncs, the second completes them with the tokens the first returned.
+ *
+ * Prints throughput, the number of error replies and of misses: full reads that found no key,
+ * and EXHSYNCGET replies for a hash that is not synced. Error replies are counted; they fail
+ * a population run (load*) only.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,6 +61,7 @@ typedef struct {
 /* Backing storage for one command's arguments. */
 typedef struct {
     char key[64];
+    char token[24];
     char field[MAX_FIELDS][24];
     char value[MAX_FIELDS][8 + MAX_VALUE_LEN + 1];
     char version[MAX_FIELDS][24];
@@ -68,7 +79,8 @@ static long long now_us(void) {
 
 static void usage(void) {
     fprintf(stderr,
-            "usage: loadgen -w loadset|loadmset|loadhset|gt|mset|getallver [-h host] [-p port] [-k keys] [-f fields]\n"
+            "usage: loadgen -w load|loadset|loadmset|loadhset|lww|gt|mset|getallver|syncget|sync [-h host] [-p port]\n"
+            "               [-k keys] [-f fields]\n"
             "               [-m fields_per_write] [-n ops] [-P pipeline] [-v value_len] [-s stale_pct] [-t ttl] [-S seed]\n");
     exit(2);
 }
@@ -129,6 +141,22 @@ static void build_full_key(Command *cmd, const Config *cfg, long k, long long ve
     }
 }
 
+/* Every field of key k as one EXHSYNC with the token EXHSYNCBEGIN returned. */
+static void build_sync(Command *cmd, const Config *cfg, long k, long long version, long long token) {
+    cmd->argc = 0;
+    set_key(cmd, k);
+    arg_str(cmd, "EXHSYNC");
+    arg_str(cmd, cmd->key);
+    snprintf(cmd->token, sizeof(cmd->token), "%lld", token);
+    arg_str(cmd, cmd->token);
+    for (long f = 0; f < cfg->fields; f++) {
+        set_field(cmd, (int)f, f, k + f, cfg->value_len, version);
+        arg_str(cmd, cmd->field[f]);
+        arg(cmd, cmd->value[f], cfg->value_len);
+        arg_str(cmd, cmd->version[f]);
+    }
+}
+
 /* `n` distinct fields of key k, starting at a random field, as one EXHMSET. */
 static void build_mset(Command *cmd, const Config *cfg, long k, long n, long op) {
     cmd->argc = 0;
@@ -143,8 +171,88 @@ static void build_mset(Command *cmd, const Config *cfg, long k, long n, long op)
     }
 }
 
-/* Appends the command for operation `op`. */
-static void append_op(redisContext *c, const Config *cfg, Command *cmd, long op, long long base_version) {
+/* How a reply is counted. */
+enum { REPLY_PLAIN, REPLY_SYNCGET, REPLY_TOKEN };
+
+/* The connection, the replies it expects and the counts of the replies it got. */
+typedef struct {
+    redisContext *c;
+    int *kinds; /* the kind of each pending reply, in order */
+    int pending;
+    long long *tokens; /* the REPLY_TOKEN replies of the last drain, in order; 0 for an error */
+    int ntokens;
+    long long errors, misses, replies;
+} Client;
+
+static void expect(Client *cl, int kind) {
+    cl->kinds[cl->pending++] = kind;
+}
+
+/* Reads every pending reply; returns -1 when the connection failed. */
+static int drain(Client *cl) {
+    cl->ntokens = 0;
+    for (int i = 0; i < cl->pending; i++) {
+        redisReply *reply;
+        if (redisGetReply(cl->c, (void **)&reply) != REDIS_OK) {
+            fprintf(stderr, "reply: %s\n", cl->c->errstr);
+            return -1;
+        }
+        int kind = cl->kinds[i];
+        if (reply->type == REDIS_REPLY_ERROR) {
+            if (cl->errors == 0) {
+                fprintf(stderr, "first error reply: %s\n", reply->str);
+            }
+            cl->errors++;
+            if (kind == REPLY_TOKEN) {
+                cl->tokens[cl->ntokens++] = 0;
+            }
+        } else if (kind == REPLY_TOKEN) {
+            cl->tokens[cl->ntokens++] = reply->integer;
+        } else if (kind == REPLY_SYNCGET) {
+            if (reply->type == REDIS_REPLY_ARRAY && reply->elements == 2 && reply->element[0]->integer == 0) {
+                cl->misses++;
+            }
+        } else if (reply->type == REDIS_REPLY_ARRAY && reply->elements == 0) {
+            cl->misses++; /* a full read of a key that does not exist */
+        }
+        cl->replies++;
+        freeReplyObject(reply);
+    }
+    cl->pending = 0;
+    return 0;
+}
+
+static int opens_sync(const char *w) {
+    return !strcmp(w, "load") || !strcmp(w, "sync");
+}
+
+/* Appends the commands of `n` load or sync operations from `op` in two round trips: the
+ * first opens a sync of each key, the second completes them. */
+static int run_syncs(Client *cl, const Config *cfg, Command *cmd, long op, long n, long long base_version, long *keys) {
+    int load = !strcmp(cfg->workload, "load");
+    for (long i = 0; i < n; i++) {
+        keys[i] = load ? op + i : random() % cfg->keys;
+        set_key(cmd, keys[i]);
+        if (!load) {
+            redisAppendCommand(cl->c, "EXHSYNCGET %s", cmd->key);
+            expect(cl, REPLY_SYNCGET);
+        }
+        redisAppendCommand(cl->c, "EXHSYNCBEGIN %s", cmd->key);
+        expect(cl, REPLY_TOKEN);
+    }
+    if (drain(cl) != 0) {
+        return -1;
+    }
+    for (long i = 0; i < n; i++) {
+        build_sync(cmd, cfg, keys[i], base_version + op + i, cl->tokens[i]);
+        redisAppendCommandArgv(cl->c, cmd->argc, cmd->argv, cmd->argvlen);
+        expect(cl, REPLY_PLAIN);
+    }
+    return drain(cl);
+}
+
+/* Appends the command of operation `op` of a workload other than load and sync. */
+static void append_op(Client *cl, const Config *cfg, Command *cmd, long op, long long base_version) {
     const char *w = cfg->workload;
     long long version = base_version + op;
 
@@ -166,11 +274,24 @@ static void append_op(redisContext *c, const Config *cfg, Command *cmd, long op,
         long k = random() % cfg->keys;
         if (!strcmp(w, "mset")) {
             build_mset(cmd, cfg, k, cfg->fields_per_write, op);
-        } else if (!strcmp(w, "getallver")) {
+        } else if (!strcmp(w, "getallver") || !strcmp(w, "syncget")) {
             cmd->argc = 0;
             set_key(cmd, k);
-            arg_str(cmd, "EXHGETALLWITHVER");
+            arg_str(cmd, !strcmp(w, "syncget") ? "EXHSYNCGET" : "EXHGETALLWITHVER");
             arg_str(cmd, cmd->key);
+        } else if (!strcmp(w, "lww")) {
+            /* Every write carries a microsecond timestamp, so version 1 is older than any field. */
+            if (cfg->stale_pct > 0 && random() % 100 < cfg->stale_pct) {
+                version = 1;
+            }
+            cmd->argc = 0;
+            set_key(cmd, k);
+            set_field(cmd, 0, random() % cfg->fields, op, cfg->value_len, version);
+            arg_str(cmd, "EXHMSETLWW");
+            arg_str(cmd, cmd->key);
+            arg_str(cmd, cmd->field[0]);
+            arg(cmd, cmd->value[0], cfg->value_len);
+            arg_str(cmd, cmd->version[0]);
         } else if (!strcmp(w, "gt")) {
             /* Every write carries a microsecond timestamp, so version 1 is older than any field. */
             if (cfg->stale_pct > 0 && random() % 100 < cfg->stale_pct) {
@@ -190,7 +311,8 @@ static void append_op(redisContext *c, const Config *cfg, Command *cmd, long op,
             usage();
         }
     }
-    redisAppendCommandArgv(c, cmd->argc, cmd->argv, cmd->argvlen);
+    redisAppendCommandArgv(cl->c, cmd->argc, cmd->argv, cmd->argvlen);
+    expect(cl, !strcmp(w, "syncget") ? REPLY_SYNCGET : REPLY_PLAIN);
 }
 
 int main(int argc, char **argv) {
@@ -217,7 +339,7 @@ int main(int argc, char **argv) {
         cfg.value_len > MAX_VALUE_LEN || cfg.pipeline <= 0 || cfg.fields_per_write <= 0 || cfg.fields_per_write > cfg.fields || cfg.ttl < 0) {
         usage();
     }
-    if (!strcmp(cfg.workload, "loadmset") || !strcmp(cfg.workload, "loadhset")) {
+    if (!strcmp(cfg.workload, "load") || !strcmp(cfg.workload, "loadmset") || !strcmp(cfg.workload, "loadhset")) {
         cfg.ops = cfg.keys;
     } else if (!strcmp(cfg.workload, "loadset")) {
         cfg.ops = cfg.keys * cfg.fields;
@@ -231,34 +353,33 @@ int main(int argc, char **argv) {
     }
 
     Command *cmd = calloc(1, sizeof(*cmd));
+    /* A sync batch has two commands per op in its first round trip. */
+    Client cl = {c, calloc(2 * cfg.pipeline, sizeof(int)), 0, calloc(cfg.pipeline, sizeof(long long)), 0, 0, 0, 0};
+    long *batch_keys = calloc(cfg.pipeline, sizeof(long));
+    if (cmd == NULL || cl.kinds == NULL || cl.tokens == NULL || batch_keys == NULL) {
+        fprintf(stderr, "out of memory\n");
+        return 1;
+    }
     long long base_version = now_us();
-    long long errors = 0, replies = 0, misses = 0;
     long long start = now_us();
 
     for (long op = 0; op < cfg.ops;) {
-        int pending = 0;
-        for (long i = 0; i < cfg.pipeline && op < cfg.ops; i++, op++) {
-            append_op(c, &cfg, cmd, op, base_version);
-            pending++;
-        }
-        for (int i = 0; i < pending; i++) {
-            redisReply *reply;
-            if (redisGetReply(c, (void **)&reply) != REDIS_OK) {
-                fprintf(stderr, "reply: %s\n", c->errstr);
+        long n = cfg.pipeline < cfg.ops - op ? cfg.pipeline : cfg.ops - op;
+        if (opens_sync(cfg.workload)) {
+            if (run_syncs(&cl, &cfg, cmd, op, n, base_version, batch_keys) != 0) {
                 return 1;
             }
-            if (reply->type == REDIS_REPLY_ERROR) {
-                if (errors == 0) {
-                    fprintf(stderr, "first error reply: %s\n", reply->str);
-                }
-                errors++;
-            } else if (reply->type == REDIS_REPLY_ARRAY && reply->elements == 0) {
-                misses++; /* a full read of a key that does not exist */
+        } else {
+            for (long i = 0; i < n; i++) {
+                append_op(&cl, &cfg, cmd, op + i, base_version);
             }
-            replies++;
-            freeReplyObject(reply);
+            if (drain(&cl) != 0) {
+                return 1;
+            }
         }
+        op += n;
     }
+    long long errors = cl.errors, misses = cl.misses, replies = cl.replies;
 
     double secs = (now_us() - start) / 1e6;
     printf("workload=%s keys=%ld fields=%ld fields_per_write=%ld ops=%ld pipeline=%ld value_len=%ld stale_pct=%ld secs=%.3f "
@@ -266,6 +387,9 @@ int main(int argc, char **argv) {
            cfg.workload, cfg.keys, cfg.fields, cfg.fields_per_write, cfg.ops, cfg.pipeline, cfg.value_len, cfg.stale_pct, secs,
            cfg.ttl, cfg.ops / secs, errors, misses, replies);
     free(cmd);
+    free(cl.kinds);
+    free(cl.tokens);
+    free(batch_keys);
     redisFree(c);
     /* A population run that got error replies did not populate what the measurement assumes. */
     return (errors > 0 && !strncmp(cfg.workload, "load", 4)) ? 1 : 0;

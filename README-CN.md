@@ -21,6 +21,12 @@
 - 针对field支持高效的active expire和passivity expire，其中active expire支持SCAN_MODE、SORT_MODE和SLAB_MODE模式。
 - 支持field过期删除事件通知（基于pubsub）
 
+## 内存
+
+每个field是一次内存分配，包含名称、值、版本和过期时间，并直接挂在哈希表的链上。一个包含30个field（名称和值均为8字节）的key总共约占1.9KB（`bench/profile.sh`，Redis 7.0，jemalloc），而每个field使用一个dict entry、一个值结构体和两个字符串对象时约为3.9KB。只有当key的某个field设置了过期时间时才会分配过期索引；如果为每个key都分配过期索引，同样的key约占5.2KB。
+
+`MEMORY USAGE` 返回分配器为该key持有的内存：哈希及其field，以及该key自身的过期索引和索引中过期field名称的副本。它不包含SORT_MODE和SLAB_MODE在每个数据库的过期索引中为该key保存的条目，即一个跳表节点和一份key名称的副本（key名称较短时约130字节）。
+
 ## 主动过期
 
 ### SCAN_MODE（扫描模式）：

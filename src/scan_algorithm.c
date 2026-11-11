@@ -153,7 +153,7 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
             /* EXHDELREPL, which expires the field, takes its entry out of the index, and with the
              * last field of the hash it deletes the key: the hash may be gone when it returns. */
             m_zskiplistNode *next = ln2->level[0].forward;
-            if (dictSize(tair_hash_obj->hash) == 1) {
+            if (ftSize(&tair_hash_obj->hash) == 1) {
                 may_delkey = 1;
             }
             field = ln2->member;
@@ -221,7 +221,7 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
         }
 
         tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
-        if (dictSize(tair_hash_obj->hash) == 1) {
+        if (ftSize(&tair_hash_obj->hash) == 1) {
             may_delkey = 1;
         }
         RedisModule_CloseKey(real_key);
@@ -292,7 +292,9 @@ int deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, ta
         /* field may be the expire index's own copy of the name, which deleting the index entry frees. */
         RedisModuleString *field_dup = RedisModule_CreateStringFromString(NULL, field);
         m_zslDelete(obj->expire_index, expire, field_dup, NULL);
-        m_dictDelete(obj->hash, field_dup);
+        size_t field_len;
+        const char *field_ptr = RedisModule_StringPtrLen(field_dup, &field_len);
+        ftDelete(&obj->hash, field_ptr, field_len);
         RedisModule_Replicate(ctx, "EXHDEL", "ss", key_dup, field_dup);
         notifyFieldSpaceEvent("expired", key_dup, field_dup, dbid);
         RedisModule_FreeString(NULL, key_dup);

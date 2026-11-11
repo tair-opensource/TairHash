@@ -128,6 +128,16 @@ cmake ../ && make -j
 ```
 ./redis-server --loadmodule /path/to/tairhash_module.so
 ```  
+编译选项（`cmake -D<选项>=ON ../`）：
+
+| 选项 | 默认值 | 说明 |
+|---|---|---|
+| `SORT_MODE` / `SLAB_MODE` | `OFF` | 主动过期算法（默认SCAN模式） |
+| `TAIRHASH_NATIVE_ARCH` | `OFF` | 针对编译机器的CPU优化（`-march=native`）。仅适用于在运行机器上编译：这样编译的二进制在其他CPU上可能因SIGILL崩溃，例如在CI上构建的Docker镜像。SLAB模式无需开启即可在运行时选择AVX2路径。 |
+| `TAIRHASH_LTO` | `OFF` | 链接时优化 |
+| `SANITIZER_MODE` | 未设置 | `address`、`undefined` 或 `thread` |
+| `GCOV_MODE` | `OFF` | 覆盖率插桩 |
+
 ## 测试方法
 
 1. 修改`tests`目录下tairhash.tcl文件中的路径为`set testmodule [file your_path/tairhash_module.so]`

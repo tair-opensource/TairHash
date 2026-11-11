@@ -204,22 +204,19 @@ void slab_expireDelete(tairhash_zskiplist *zsl, RedisModuleString *key, long lon
         return;
     }
 
-    int update_findNode = FALSE, delete_ans = FALSE;
-    if (find_node->expire_min == expire && RedisModule_StringCompare(find_node->key_min, key) == 0)
-        update_findNode = TRUE;
-    delete_ans = slab_deleteNode(find_slab, key, expire);
+    /* key_min borrows one of the slab's keys, and slab_deleteNode frees the deleted key. When that key is the
+     * node's minimum, unlink the node while key_min is still valid, then relink it under the slab's new minimum. */
+    int is_node_min = find_node->expire_min == expire && RedisModule_StringCompare(find_node->key_min, key) == 0;
+    if (is_node_min) {
+        int ret = tairhash_zslDelete(zsl, key, expire);
+        assert(ret == 1);
+    }
+    int delete_ans = slab_deleteNode(find_slab, key, expire);
     assert(delete_ans == TRUE);
 
-    if (update_findNode) {  // update min value
+    if (is_node_min) {
         int smallest_subscript = slab_minExpireTimeIndex(find_slab);
-        long long new_expire_min = find_slab->expires[smallest_subscript];
-        RedisModuleString *new_key_min = find_slab->keys[smallest_subscript];
-        if (new_expire_min != find_node->expire_min || RedisModule_StringCompare(new_key_min, find_node->key_min) != 0) {
-            Slab *slab = find_node->slab;
-            int ret = tairhash_zslDelete(zsl, find_node->key_min, find_node->expire_min);
-            assert(ret == 1);
-            find_node = tairhash_zslInsertNode(zsl, slab, new_key_min, new_expire_min);
-        }
+        find_node = tairhash_zslInsertNode(zsl, find_slab, find_slab->keys[smallest_subscript], find_slab->expires[smallest_subscript]);
     }
     slab_mergeIfNeed(zsl, find_node);  // if need merge
     return;
@@ -258,14 +255,25 @@ void slab_deleteSlabExpire(tairhash_zskiplist *zsl, tairhash_zskiplistNode *zsl_
     if (slab == NULL || slab->num_keys == effective_num) {
         return;
     }
+    /* key_min usually borrows one of the expired keys freed below, so unlink the node while it is still valid. */
+    int delete_ans = tairhash_zslDelete(zsl, zsl_node->key_min, zsl_node->expire_min);
+    assert(delete_ans == 1);
     if (effective_num == 0) {
-        Slab *new_slab = slab;
-        int delete_ans = tairhash_zslDelete(zsl, zsl_node->key_min, zsl_node->expire_min);
-        assert(delete_ans == 1);
         slab_delete(slab);
         return;
     }
+
+    /* effective_indexs is ascending, so compacting in place never overwrites an entry still to be read. */
+    char keep[SLABMAXN] = {0};
     int index = 0, min_index = 0, i;
+    for (i = 0; i < effective_num; i++) {
+        keep[effective_indexs[i]] = 1;
+    }
+    for (i = 0; i < slab->num_keys; i++) {
+        if (!keep[i]) {
+            RedisModule_FreeString(NULL, slab->keys[i]);
+        }
+    }
     for (i = 0; i < effective_num; i++) {
         index = effective_indexs[i];
         slab->expires[i] = slab->expires[index];
@@ -274,14 +282,11 @@ void slab_deleteSlabExpire(tairhash_zskiplist *zsl, tairhash_zskiplistNode *zsl_
             min_index = i;
         }
     }
-    slab->num_keys = effective_num;
-    long long new_expire_min = slab->expires[min_index];
-    RedisModuleString *new_key_min = slab->keys[min_index];
-    if (new_expire_min != zsl_node->expire_min || RedisModule_StringCompare(new_key_min, zsl_node->key_min) != 0) {
-        int ret = tairhash_zslDelete(zsl, zsl_node->key_min, zsl_node->expire_min);
-        assert(ret == 1);
-        zsl_node = tairhash_zslInsertNode(zsl, slab, new_key_min, new_expire_min);
+    for (i = effective_num; i < slab->num_keys; i++) {
+        slab->expires[i] = 0, slab->keys[i] = NULL;
     }
+    slab->num_keys = effective_num;
+    zsl_node = tairhash_zslInsertNode(zsl, slab, slab->keys[min_index], slab->expires[min_index]);
     slab_mergeIfNeed(zsl, zsl_node);
     return;
 }

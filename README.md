@@ -29,7 +29,7 @@
 - The built-in timer will periodically use the SCAN command to find the TairHash that contains the expired field, and then check the sort index inside the TairHash to eliminate the field
 - All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
-**Supported redis version**: redis >= 5.0
+**Supported server versions**: redis >= 5.0, valkey >= 7.2
 
 **Advantages**: can run in the low version of redis (redis >= 5.0)  
 
@@ -43,7 +43,7 @@
 - The built-in timer will periodically scan the first-level index to find out a key that has expired, and then check the secondary index of these keys to eliminate the expired fields. This is the active expire
 - All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
-**Supported redis version**: redis >= 7.0
+**Supported server versions**: redis >= 7.0, valkey >= 7.2
 
 **Advantages**: higher efficiency of expire elimination     
 
@@ -56,7 +56,7 @@
 - Like SORT mode, keys are globally sorted to ensure that keys that need to be expired can be found faster. Unlike SORT mode, SLAB does not sort the fields inside the key, which saves memory overhead. 
 - The SLAB expiration algorithm uses SIMD instructions (when supported by the hardware) to speed up the search for expired fields
 
-**Supported redis version**: redis >= 7.0  
+**Supported server versions**: redis >= 7.0, valkey >= 7.2  
 
 **Advantages**: Efficient elimination, low memory consumption, and fast access bring new ideas to expiration algorithms   
 
@@ -133,6 +133,7 @@ then the tairhash_module.so library file will be generated in the lib directory
 
 ```
 ./redis-server --loadmodule /path/to/tairhash_module.so
+./valkey-server --loadmodule /path/to/tairhash_module.so
 ```  
 ## TEST
 
@@ -154,8 +155,12 @@ Requirements: a C toolchain, CMake 3.10+, git and Tcl 8.5+. On macOS the
 `Exhincrbyfloat*` tests fail because `long double` is 64-bit there; they pass on Linux.
 
 To run a suite by hand instead: replace `your_path` in the suite with the directory of
-`tairhash_module.so`, copy it to `tests/unit/type/` in a Redis source tree and run
-`./runtest --single unit/type/<suite>`.
+`tairhash_module.so`, copy it to `tests/unit/type/` in a Redis or Valkey source tree and
+run `./runtest --single unit/type/<suite>`.
+
+CI runs every suite against Redis 5.0, 6.2, 7.0, 7.2, 7.4 and 8.10 and Valkey 7.2, 8.1 and
+9.1, on x86-64 and arm64. Redis 7.0 runs every expire mode, and SCAN and SORT mode also under
+AddressSanitizer; Redis 8.10 and Valkey 9.1 run SCAN mode under AddressSanitizer too.
 
 ## Client
 

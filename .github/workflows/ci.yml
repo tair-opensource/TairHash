@@ -8,8 +8,8 @@ permissions:
 jobs:
 
   test:
-    name: ${{ matrix.server }}-${{ matrix.version }} (${{ matrix.algorithm }}, sanitizer=${{ matrix.sanitizer }})
-    runs-on: ubuntu-latest
+    name: ${{ matrix.server }}-${{ matrix.version }} (${{ matrix.algorithm }}, sanitizer=${{ matrix.sanitizer }}${{ matrix.os && ', arm64' || '' }})
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -22,6 +22,19 @@ jobs:
           - {server: redis, version: '7.0', algorithm: slab, sanitizer: none, coverage: true}
           - {server: redis, version: '7.0', algorithm: scan, sanitizer: address}
           - {server: redis, version: '7.0', algorithm: sort, sanitizer: address}
+          - {server: redis, version: '7.2.17', algorithm: scan, sanitizer: none}
+          - {server: redis, version: '7.4.12', algorithm: scan, sanitizer: none}
+          # SORT and SLAB mode run on Redis 7.0 only: on newer servers they expose expire
+          # index bugs (a key-name refcount race, the AVX2 slab split) that are fixed separately.
+          - {server: redis, version: '8.10.3', algorithm: scan, sanitizer: none}
+          - {server: redis, version: '8.10.3', algorithm: scan, sanitizer: address}
+          - {server: valkey, version: '7.2.15', algorithm: scan, sanitizer: none}
+          - {server: valkey, version: '8.1.11', algorithm: scan, sanitizer: none}
+          - {server: valkey, version: '9.1.3', algorithm: scan, sanitizer: none}
+          - {server: valkey, version: '9.1.3', algorithm: scan, sanitizer: address}
+          # arm64: no AVX2, so SLAB mode runs its scalar path.
+          - {server: redis, version: '7.0', algorithm: slab, sanitizer: none, os: ubuntu-26.04-arm}
+          - {server: valkey, version: '9.1.3', algorithm: scan, sanitizer: none, os: ubuntu-26.04-arm}
     # Prefixed so the server build does not read them: its Makefile rejects SANITIZER=none.
     env:
       MATRIX_SERVER: ${{ matrix.server }}

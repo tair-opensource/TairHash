@@ -1,5 +1,12 @@
 set testmodule [file normalize your_path/tairhash_module.so]
 
+# The suite runs under both the Redis and the Valkey test harness; Valkey renamed redis_deferring_client.
+if {[llength [info commands valkey_deferring_client]]} {
+    interp alias {} tairhash_deferring_client {} valkey_deferring_client
+} else {
+    interp alias {} tairhash_deferring_client {} redis_deferring_client
+}
+
 
 start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
     r module load $testmodule
@@ -1682,8 +1689,8 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
        r select 1
        r del exhashkey2
        
-       set rd1 [redis_deferring_client]
-       set rd2 [redis_deferring_client]
+       set rd1 [tairhash_deferring_client]
+       set rd2 [tairhash_deferring_client]
 
        assert_equal {1} [psubscribe $rd1 {tairhash*}]
        assert_equal {1} [psubscribe $rd2 {tairhash@1@exhashkey2*}]

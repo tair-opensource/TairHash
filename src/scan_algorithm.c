@@ -183,22 +183,22 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
     RedisModuleKey *real_key;
     unsigned long zsl_len;
     int may_delkey = 0;
-    /* 1. The current db does not have a key that needs to expire. */
-    list *keys = m_listCreate();
+    int has_expiring = 0;
 
+    /* 1. Nothing to do unless the key is a tairhash with expiring fields; decide that
+     * before allocating anything, since this runs before every write. */
     real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE);
     if (RedisModule_KeyType(real_key) != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType) {
         tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
-        if (TAIRHASH_EXPIRE_INDEX_LEN(tair_hash_obj) > 0) {
-            m_listAddNodeTail(keys, key);
-        }
+        has_expiring = TAIRHASH_EXPIRE_INDEX_LEN(tair_hash_obj) > 0;
     }
     RedisModule_CloseKey(real_key);
-
-    if (listLength(keys) == 0) {
-        m_listRelease(keys);
+    if (!has_expiring) {
         return;
     }
+
+    list *keys = m_listCreate();
+    m_listAddNodeTail(keys, key);
 
     /* 3. Delete expired field. */
     int keys_per_loop = g_expire_algorithm.keys_per_passive_loop;

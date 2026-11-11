@@ -123,16 +123,27 @@ mkdir build
 cd build  
 cmake ../ && make -j
 ```
-编译成功后会在lib目录下产生tairhash_module.so库文件
+编译成功后会在lib目录下产生tairhash_module.so库文件（`cmake -DTAIRHASH_OUTPUT_DIR=<目录> ../` 可指定其他输出目录）
 
 ```
 ./redis-server --loadmodule /path/to/tairhash_module.so
 ```  
 ## 测试方法
 
-1. 修改`tests`目录下tairhash.tcl文件中的路径为`set testmodule [file your_path/tairhash_module.so]`
-2. 将`tests`目录下tairhash.tcl文件路径加入到redis的test_helper.tcl的all_tests中
-3. 在redis根目录下运行./runtest --single tairhash
+`tests/run.sh` 会编译模块，并在Redis或Valkey源码的测试框架中运行 `tests/` 下的TCL测试。CI的每个任务都通过该脚本运行，因此本地运行与CI执行相同的步骤。服务端源码只会在 `.deps/` 下克隆并编译一次；每种模块变体编译到 `build/` 下各自的目录。
+
+```
+tests/run.sh                                  # 所有测试，SCAN模式，Redis 7.0
+tests/run.sh --mode sort --suite tairhash     # 指定测试与过期模式
+tests/run.sh --sanitizer address              # 使用ASan编译模块与Redis
+tests/run.sh --coverage                       # 输出模块的行/函数覆盖率
+tests/run.sh --server-ref 7.2 -- --baseport 25000   # 其他Redis分支，附加runtest参数
+tests/run.sh --server valkey --server-ref 9.1.3     # 使用Valkey
+```
+
+依赖：C编译工具链、CMake 3.10+、git、Tcl 8.5+。macOS上 `long double` 为64位，`Exhincrbyfloat*` 测试会失败，Linux上正常。
+
+手动运行：将测试文件中的 `your_path` 替换为 `tairhash_module.so` 所在目录，复制到Redis源码的 `tests/unit/type/` 下，运行 `./runtest --single unit/type/<suite>`。
 
 ## 客户端
 

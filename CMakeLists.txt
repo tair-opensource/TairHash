@@ -29,7 +29,8 @@ endif(SANITIZER_MODE MATCHES "address")
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 
-SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)  
+set(TAIRHASH_OUTPUT_DIR ${PROJECT_SOURCE_DIR}/lib CACHE PATH "Directory the module library is written to")
+set(LIBRARY_OUTPUT_PATH ${TAIRHASH_OUTPUT_DIR})
 
 option(SORT_MODE "Use two-level sort index to to implement active expire" OFF)
 

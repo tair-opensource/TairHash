@@ -403,7 +403,7 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal "" $ret_val
     }
 
-    test {Active expire with repeat feilds} {
+    test {Active expire with repeat fields} {
         r select 8
         r del tairhashkey
         r exhset tairhashkey f v ex 1

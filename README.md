@@ -49,7 +49,7 @@
 
 **Disadvantages**: More memory consumption  
 
-**Usag**e: cmake with `-DSORT_MODE=yes` option, and recompile
+**Usage**: cmake with `-DSORT_MODE=yes` option, and recompile
 
 ### SLAB_MODE：  
 - Slab mode is a low memory usage (compared with SORT mode), cache-friendly, high-performance expiration algorithm

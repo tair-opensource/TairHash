@@ -888,7 +888,7 @@ Parameter：
 > key: The key used to find the TairHash      
 > cursor: Scan cursor, starting from 0, after each scan, it will return to the next scan cursor, until it returns 0 to indicate the end of the scan       
 > MATCH: Rules for filtering scan results      
-> COUNT: It is used to specify the number of fields in a single scan. Note that COUNT only represents the number of feilds of TairHash scanned each time. It does not mean that COUNT field result sets will be returned in the end. The size of the result set depends on the current fields in TaiHash. The number and whether to specify MATCH for filtering depends. The default value of COUNT is 10      
+> COUNT: It is used to specify the number of fields in a single scan. Note that COUNT only represents the number of fields of TairHash scanned each time. It does not mean that COUNT field result sets will be returned in the end. The size of the result set depends on the current fields in TaiHash. The number and whether to specify MATCH for filtering depends. The default value of COUNT is 10      
 
 
 

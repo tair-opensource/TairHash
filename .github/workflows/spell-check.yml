@@ -9,17 +9,19 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Spellcheck
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v7
 
-      - name: Install prerequisites
-        run: sudo pip install codespell==2.0.0
-
+      # pipx keeps codespell out of the runner's externally managed system Python.
       - name: Spell check
-        run: codespell --config=./.github/.codespellrc
+        run: pipx run codespell==2.4.3 --config=./.github/.codespellrc

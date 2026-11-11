@@ -46,6 +46,18 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         return $counts
     }
 
+    # Objects handed to the lazyfree thread so far; older servers report only the pending count.
+    proc lazyfree_total {} {
+        set total 0
+        foreach field {lazyfreed_objects lazyfree_pending_objects} {
+            set value [s $field]
+            if {$value ne ""} {
+                incr total $value
+            }
+        }
+        return $total
+    }
+
     proc psubscribe {client channels} {
         $client psubscribe {*}$channels
         __consume_subscribe_messages $client psubscribe $channels
@@ -418,6 +430,23 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal 0 [r exists tairhashkey]
         set info [r exhexpireinfo]
         assert { [string match "*db: 8, active_expired_fields: 1*" $info] }
+    }
+
+    test {Active expire frees emptied keys synchronously} {
+        # A free effort of 0 tells the server to always free a value asynchronously, which an emptied TairHash must not request.
+        set prev [lindex [r config get lazyfree-lazy-server-del] 1]
+        r config set lazyfree-lazy-server-del yes
+        r del emptiedkey
+        set before [lazyfree_total]
+
+        r exhset emptiedkey field val px 100
+        wait_for_condition 50 100 {
+            [r exists emptiedkey] == 0
+        } else {
+            fail "emptiedkey was not actively expired"
+        }
+        assert_equal $before [lazyfree_total]
+        r config set lazyfree-lazy-server-del $prev
     }
 
     test {Async flushall/flushdb/unlink} {

@@ -216,6 +216,13 @@ static void tairHashTypeReleaseObject(struct tairHashObj *o) {
     RedisModule_Free(o);
 }
 
+/* The server treats a free effort of 0 as "always free asynchronously", which would hand
+ * every emptied TairHash to a background thread. Count the object itself so small values
+ * are freed synchronously. */
+static size_t tairHashFreeEffort(const struct tairHashObj *o) {
+    return 1 + dictSize(o->hash) + o->expire_index->length;
+}
+
 static struct tairHashObj *createTairHashTypeObject() {
     tairHashObj *o = RedisModule_Calloc(1, sizeof(*o));
     o->hash = m_dictCreate(&tairhashDictType, NULL);
@@ -2908,8 +2915,8 @@ void *TairHashTypeCopy2(RedisModuleKeyOptCtx *ctx, const void *value) {
 }
 
 size_t TairHashTypeEffort2(RedisModuleKeyOptCtx *ctx, const void *value) {
-    tairHashObj *o = (tairHashObj *)value;
-    return dictSize(o->hash) + o->expire_index->length;
+    REDISMODULE_NOT_USED(ctx);
+    return tairHashFreeEffort(value);
 }
 #else
 
@@ -2953,8 +2960,7 @@ size_t TairHashTypeMemUsage(const void *value) {
 
 size_t TairHashTypeEffort(RedisModuleString *key, const void *value) {
     REDISMODULE_NOT_USED(key);
-    tairHashObj *o = (tairHashObj *)value;
-    return dictSize(o->hash) + o->expire_index->length;
+    return tairHashFreeEffort(value);
 }
 
 #endif

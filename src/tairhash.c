@@ -392,30 +392,32 @@ static int keySpaceNotification(RedisModuleCtx *ctx, int type, const char *event
 
         RedisModule_SelectDb(ctx, local_to_dbid);
         RedisModuleKey *real_key = RedisModule_OpenKey(ctx, local_to_key, REDISMODULE_READ | REDISMODULE_WRITE);
-        int type = RedisModule_KeyType(real_key);
-        Module_Assert(type != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType);
-        tairHashObj *tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
-
-        /* If there are no expire fields, we don’t have any indexes to adjust, just return ASAP. */
-        if (tair_hash_obj->expire_index->length == 0) {
-            return REDISMODULE_OK;
+        tairHashObj *tair_hash_obj = NULL;
+        if (RedisModule_KeyType(real_key) == REDISMODULE_KEYTYPE_MODULE && RedisModule_ModuleTypeGetType(real_key) == TairHashType) {
+            tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
         }
+
+        /* Keys of every type are renamed and moved. Only a tairhash tracks its own name,
+         * and only one with expiring fields has an entry in the db expire index. */
+        if (tair_hash_obj) {
+            int indexed = tair_hash_obj->expire_index->length > 0;
+            long long previous_index = 0;
+            if (indexed) {
 #ifdef SLAB_MODE
-        long long previous_index = tair_hash_obj->expire_index->header->level[0].forward->expire_min;
+                previous_index = tair_hash_obj->expire_index->header->level[0].forward->expire_min;
 #else
-        long long previous_index = tair_hash_obj->expire_index->header->level[0].forward->score;
+                previous_index = tair_hash_obj->expire_index->header->level[0].forward->score;
 #endif
-
-        /* Delete the previous index */
-        m_zslDelete(g_expire_index[local_from_dbid], previous_index, local_from_key, NULL);
-        if (tair_hash_obj->key) {
-            /* Change key name. */
-            RedisModule_FreeString(NULL, tair_hash_obj->key);
-            tair_hash_obj->key = RedisModule_CreateStringFromString(NULL, local_to_key);
+                m_zslDelete(g_expire_index[local_from_dbid], previous_index, local_from_key, NULL);
+            }
+            if (tair_hash_obj->key) {
+                RedisModule_FreeString(NULL, tair_hash_obj->key);
+                tair_hash_obj->key = RedisModule_CreateStringFromString(NULL, local_to_key);
+            }
+            if (indexed) {
+                m_zslInsert(g_expire_index[local_to_dbid], previous_index, takeAndRef(tair_hash_obj->key));
+            }
         }
-
-        /* Re-insert to dst index. */
-        m_zslInsert(g_expire_index[local_to_dbid], previous_index, takeAndRef(tair_hash_obj->key));
 
         /* Release sources. */
         if (cmd_flag == CMD_RENAME) {

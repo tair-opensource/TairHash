@@ -487,6 +487,72 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal 0 [r dbsize]  
     }
 
+    test {Rename and move keys of other types} {
+        r select 11
+        r del strkey strkey2
+        r set strkey val
+        r rename strkey strkey2
+        r move strkey2 12
+        assert_equal 0 [r exists strkey2]
+        r select 12
+        assert_equal val [r get strkey2]
+        r del strkey2
+        r select 8
+    }
+
+    test {Writes to expiring fields after RENAME and MOVE} {
+        r select 11
+        r del rmk rmk2 rmk3
+        r exhset rmk f1 v EX 100
+        r exhset rmk f2 v EX 200
+        r rename rmk rmk2
+        assert_equal 1 [r exhdel rmk2 f1]
+        assert_equal 1 [r exhexpire rmk2 f2 300]
+        r move rmk2 12
+        r select 12
+        assert_equal 1 [r exhexpire rmk2 f2 400]
+        assert_equal 1 [r exhdel rmk2 f2]
+        assert_equal 0 [r exists rmk2]
+
+        # RENAME onto a TairHash that has expiring fields of its own.
+        r select 11
+        r exhset rmk f v EX 100
+        r exhset rmk3 g v EX 50
+        r rename rmk rmk3
+        assert_equal {} [r exhget rmk3 g]
+        assert_equal 1 [r exhdel rmk3 f]
+        assert_equal 0 [r exists rmk3]
+        r select 8
+    }
+
+    test {Rename a key without expiring fields, then delete it} {
+        r select 11
+        r del renkey renkey2
+        r exhset renkey f1 v
+        r rename renkey renkey2
+        # The rename must not leave a pending rename behind for the next keyspace event.
+        r del renkey2
+        assert_equal PONG [r ping]
+        r select 8
+    }
+
+    test {Active expire after renaming a key without expiring fields} {
+        r select 11
+        r del renkey renkey2
+        r exhset renkey f1 v
+        r rename renkey renkey2
+        r exhset renkey2 f2 v px 200
+
+        # EXHLEN neither triggers nor filters expiration, so only active expire can bring it to 1.
+        wait_for_condition 50 100 {
+            [r exhlen renkey2] == 1
+        } else {
+            fail "field set after rename was not actively expired"
+        }
+        r del renkey2
+        r select 8
+    }
+
     test {Active expire rdb} {
         r del tairhashkey
 

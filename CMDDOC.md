@@ -994,3 +994,15 @@ OK
 ```
 
 <br/>
+
+## Replication and persistence
+
+Write commands replicate the resulting state of each field they wrote rather than the
+request, so a replica or an AOF replay reproduces values, versions and TTLs exactly,
+independently of its own clock and state. Each field is propagated as
+`EXHSET key field value ABS <version> [PXAT <expire>]`, with the expire as an absolute
+unix time in milliseconds. A field that `EXHSETNX` created and nothing has written since
+has version 0, which `EXHSET` cannot set, and is propagated as `EXHSETNX key field value`.
+The fields of one write command are propagated together in a MULTI/EXEC. AOF rewrite
+emits the same commands. Every TairHash version accepts them, so replicas and AOF files
+stay compatible across versions.

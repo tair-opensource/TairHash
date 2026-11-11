@@ -998,3 +998,7 @@ OK
 ```
 
 <br/>
+
+## 复制与持久化
+
+写命令复制的是本次写入的每个field的结果状态，而不是原始请求，因此从节点或AOF重放可以精确还原值、版本和过期时间，与其自身的时钟和状态无关。每个field以 `EXHSET key field value ABS <version> [PXAT <expire>]` 的形式复制，expire为毫秒级unix时间戳。由 `EXHSETNX` 创建且之后未被写过的field版本为0，`EXHSET` 无法设置版本0，因此以 `EXHSETNX key field value` 的形式复制。同一写命令涉及的多个field在一个MULTI/EXEC中一起复制。AOF重写输出相同的命令。所有TairHash版本都接受这些命令，因此不同版本之间的从节点和AOF文件保持兼容。

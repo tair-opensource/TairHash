@@ -15,8 +15,10 @@
  */
 #include "slabapi.h"
 
-#ifdef __AVX2__
-#include <cpuid.h>
+/* In SLAB mode on x86 the AVX2 split of a slab is compiled whatever the build's target CPU and
+ * chosen at runtime, so a portable build still uses it where the CPU has it. */
+#if defined(SLAB_MODE) && (defined(__x86_64__) || defined(__i386__))
+#define SLAB_AVX2_PATH 1
 #include <immintrin.h>
 #endif
 #include <stdio.h>
@@ -27,7 +29,7 @@
 #include "tairhash_skiplist.h"
 
 #define RELAXATION 10
-#ifdef __AVX2__
+#ifdef SLAB_AVX2_PATH
 /* Indexed by a 4-bit "expire > now" lane mask: the lanes that are still on time / already timed out,
  * in ascending order, padded with -1. */
 static const int32_t shuffle_ontime_lanes[16][4] __attribute__((aligned(16))) = {
@@ -308,57 +310,67 @@ unsigned int slab_deleteTairhashRangeByRank(tairhash_zskiplist *zsl, unsigned in
     return tairhash_zslDeleteRangeByRank(zsl, start, end);
 }
 
-#ifdef __AVX2__
-int slab_getSlabTimeoutExpireIndex(tairhash_zskiplistNode *node, int *ontime_indices, int *timeout_indices) {
-    long long now = RedisModule_Milliseconds();
-    if (node == NULL || node->expire_min > now) return 0;
-    Slab *slab = node->slab;
-    if (slab == NULL || slab->num_keys == 0)
-        return 0;
+/* Appends the index of each entry of expires[from..size) to the on-time or the timed-out
+ * indices, by whether it expires after `now`. */
+static void splitByExpire(const long long *expires, int from, int size, long long now, int *ontime_indices, int *ontime_num,
+                          int *timeout_indices, int *timeout_num) {
+    for (int i = from; i < size; ++i) {
+        ontime_indices[*ontime_num] = i, timeout_indices[*timeout_num] = i;
+        *ontime_num += (expires[i] > now), *timeout_num += (expires[i] <= now);
+    }
+}
 
-    __m256i target_expire_vec = _mm256_set1_epi64x(now);
-    int ontime_num = 0, timeout_num = 0, size_effective = 0, size = slab->num_keys;
-    long long *expires = slab->expires, i;
-    static const int width = sizeof(__m256i) / sizeof(long long);
-    const int veclen = size & ~(2 * width - 1);
-    int step_size = (width << 1);
+#ifdef SLAB_AVX2_PATH
+static int cpuHasAvx2(void) {
+    static int has = -1;
+    if (has < 0) {
+        __builtin_cpu_init();
+        has = __builtin_cpu_supports("avx2") && __builtin_cpu_supports("popcnt");
+    }
+    return has;
+}
+
+/* splitByExpire over the longest prefix that is a multiple of 8 entries, 8 at a time;
+ * returns where it stopped. Only called when cpuHasAvx2(). */
+__attribute__((target("avx2,popcnt"))) static int splitByExpireAvx2(const long long *expires, int size, long long now, int *ontime_indices,
+                                                                   int *ontime_num, int *timeout_indices, int *timeout_num) {
+    const __m256i target_expire_vec = _mm256_set1_epi64x(now);
+    const int width = sizeof(__m256i) / sizeof(long long);
+    const int step_size = width << 1;
+    const int veclen = size & ~(step_size - 1);
+    int i;
     for (i = 0; i < veclen; i += step_size) {
         const __m256i v_a = _mm256_lddqu_si256((const __m256i *)(expires + i));
         const __m256i v_b = _mm256_lddqu_si256((const __m256i *)(expires + i + width));
 
-        _mm_prefetch(expires + i + step_size, _MM_HINT_NTA);
+        _mm_prefetch((const char *)(expires + i + step_size), _MM_HINT_NTA);
 
         __m256i v_a_gt = _mm256_cmpgt_epi64(v_a, target_expire_vec);
         __m256i v_b_gt = _mm256_cmpgt_epi64(v_b, target_expire_vec);
-        int v_a_gt_mask = _mm256_movemask_pd((__m256d)v_a_gt);
-        int v_b_gt_mask = _mm256_movemask_pd((__m256d)v_b_gt);
+        int v_a_gt_mask = _mm256_movemask_pd(_mm256_castsi256_pd(v_a_gt));
+        int v_b_gt_mask = _mm256_movemask_pd(_mm256_castsi256_pd(v_b_gt));
         /* The expire comparison runs on 64-bit lanes, but the index arrays hold ints, so offsets are
          * built and stored as 4 x int32. */
-        __m128i v_a_cur_i = _mm_set1_epi32((int)i);
-        __m128i v_b_cur_i = _mm_set1_epi32((int)(i + width));
+        __m128i v_a_cur_i = _mm_set1_epi32(i);
+        __m128i v_b_cur_i = _mm_set1_epi32(i + width);
 
         __m128i v_a_offsets = _mm_add_epi32(v_a_cur_i, _mm_load_si128((const __m128i *)shuffle_ontime_lanes[v_a_gt_mask]));
         __m128i v_b_offsets = _mm_add_epi32(v_b_cur_i, _mm_load_si128((const __m128i *)shuffle_ontime_lanes[v_b_gt_mask]));
-        _mm_storeu_si128((__m128i *)(ontime_indices + ontime_num), v_a_offsets);
-        ontime_num += _mm_popcnt_u32((unsigned)v_a_gt_mask);
-        _mm_storeu_si128((__m128i *)(ontime_indices + ontime_num), v_b_offsets);
-        ontime_num += _mm_popcnt_u32((unsigned)v_b_gt_mask);
+        _mm_storeu_si128((__m128i *)(ontime_indices + *ontime_num), v_a_offsets);
+        *ontime_num += _mm_popcnt_u32((unsigned)v_a_gt_mask);
+        _mm_storeu_si128((__m128i *)(ontime_indices + *ontime_num), v_b_offsets);
+        *ontime_num += _mm_popcnt_u32((unsigned)v_b_gt_mask);
 
         v_a_offsets = _mm_add_epi32(v_a_cur_i, _mm_load_si128((const __m128i *)shuffle_timeout_lanes[v_a_gt_mask]));
         v_b_offsets = _mm_add_epi32(v_b_cur_i, _mm_load_si128((const __m128i *)shuffle_timeout_lanes[v_b_gt_mask]));
-        _mm_storeu_si128((__m128i *)(timeout_indices + timeout_num), v_a_offsets);
-        timeout_num += width - _mm_popcnt_u32((unsigned)v_a_gt_mask);
-        _mm_storeu_si128((__m128i *)(timeout_indices + timeout_num), v_b_offsets);
-        timeout_num += width - _mm_popcnt_u32((unsigned)v_b_gt_mask);
+        _mm_storeu_si128((__m128i *)(timeout_indices + *timeout_num), v_a_offsets);
+        *timeout_num += width - _mm_popcnt_u32((unsigned)v_a_gt_mask);
+        _mm_storeu_si128((__m128i *)(timeout_indices + *timeout_num), v_b_offsets);
+        *timeout_num += width - _mm_popcnt_u32((unsigned)v_b_gt_mask);
     }
-    for (; i < size; ++i) {
-        ontime_indices[ontime_num] = i, timeout_indices[timeout_num] = i;
-        ontime_num += (expires[i] > now), timeout_num += (expires[i] <= now);
-    }
-    return timeout_num;
+    return i;
 }
-
-#else
+#endif
 
 int slab_getSlabTimeoutExpireIndex(tairhash_zskiplistNode *node, int *ontime_indices, int *timeout_indices) {
     long long now = RedisModule_Milliseconds();
@@ -366,12 +378,13 @@ int slab_getSlabTimeoutExpireIndex(tairhash_zskiplistNode *node, int *ontime_ind
     Slab *slab = node->slab;
     if (slab == NULL || slab->num_keys == 0)
         return 0;
-    int ontime_num = 0, timeout_num = 0, size_effective = 0, size = slab->num_keys, i;
-    long long *expires = slab->expires;
-    for (i = 0; i < size; ++i) {
-        ontime_indices[ontime_num] = i, timeout_indices[timeout_num] = i;
-        ontime_num += (expires[i] > now), timeout_num += (expires[i] <= now);
+
+    int ontime_num = 0, timeout_num = 0, from = 0;
+#ifdef SLAB_AVX2_PATH
+    if (cpuHasAvx2()) {
+        from = splitByExpireAvx2(slab->expires, slab->num_keys, now, ontime_indices, &ontime_num, timeout_indices, &timeout_num);
     }
+#endif
+    splitByExpire(slab->expires, from, slab->num_keys, now, ontime_indices, &ontime_num, timeout_indices, &timeout_num);
     return timeout_num;
 }
-#endif

@@ -25,6 +25,7 @@ void insert(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
     REDISMODULE_NOT_USED(dbid);
     REDISMODULE_NOT_USED(key);
     if (expire) {
+        tairHashEnsureExpireIndex(obj);
         m_zslInsert(obj->expire_index, expire, takeAndRef(field));
     }
 }
@@ -95,7 +96,7 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
 
                     if (RedisModule_ModuleTypeGetType(real_key) == TairHashType) {
                         tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
-                        if (tair_hash_obj->expire_index->length > 0) {
+                        if (TAIRHASH_EXPIRE_INDEX_LEN(tair_hash_obj) > 0) {
                             m_listAddNodeTail(keys, key);
                         }
                     }
@@ -199,7 +200,7 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
     real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE);
     if (RedisModule_KeyType(real_key) != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType) {
         tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
-        if (tair_hash_obj->expire_index->length > 0) {
+        if (TAIRHASH_EXPIRE_INDEX_LEN(tair_hash_obj) > 0) {
             m_listAddNodeTail(keys, key);
         }
     }

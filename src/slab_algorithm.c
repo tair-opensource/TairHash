@@ -27,6 +27,7 @@ void insert(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
     REDISMODULE_NOT_USED(key);
     if (expire) {
         long long before_min_score = -1, after_min_score = -1;
+        tairHashEnsureExpireIndex(o);
         if (o->expire_index->header->level[0].forward) {
             before_min_score = o->expire_index->header->level[0].forward->expire_min;
         }

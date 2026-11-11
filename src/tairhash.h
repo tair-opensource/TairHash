@@ -71,6 +71,11 @@ typedef struct TairHashVal {
     RedisModuleString *value;
 } TairHashVal;
 
+/*
+ * `expire_index` is allocated on the first field that gets a TTL, so a hash that never
+ * uses field expiration pays nothing for it. Use TAIRHASH_EXPIRE_INDEX_LEN to read its
+ * length.
+ */
 typedef struct tairHashObj {
     dict *hash;
 #if defined SLAB_MODE
@@ -80,6 +85,8 @@ typedef struct tairHashObj {
 #endif
     RedisModuleString *key;
 } tairHashObj;
+
+#define TAIRHASH_EXPIRE_INDEX_LEN(o) ((o)->expire_index ? (o)->expire_index->length : 0)
 
 typedef struct ExpireAlgorithm {
     void (*insert)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long expire);
@@ -104,6 +111,7 @@ typedef struct ExpireAlgorithm {
 void _moduleAssert(const char *estr, const char *file, int line);
 RedisModuleString *takeAndRef(RedisModuleString *str);
 RedisModuleString *expireIndexMember(const tairHashObj *obj);
+void tairHashEnsureExpireIndex(tairHashObj *o);
 int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *raw_key, tairHashObj *obj);
 void notifyFieldSpaceEvent(char *event, RedisModuleString *key, RedisModuleString *field, int dbid);
 int isExpire(long long when);

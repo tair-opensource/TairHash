@@ -778,6 +778,42 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal 3 $h_len
     }
 
+    # MEMORY USAGE reports allocator sizes only where the server has RedisModule_MallocSize
+    # (Redis 6.0+, Valkey); older servers get an estimate.
+    if {[lindex [split [s redis_version] .] 0] >= 6} {
+        test {A hash without expiring fields allocates no expire index} {
+            r del plain ttl
+            r exhset plain f v
+            r exhset ttl f v ex 1000
+            r exhpersist ttl f
+            # The index, once allocated, is dominated by a 64-level skiplist header (~1KB).
+            assert_morethan [expr {[r memory usage ttl] - [r memory usage plain]}] 1000
+        }
+
+        test {MEMORY USAGE tracks the allocator} {
+            r flushall
+            # Valkey frees FLUSHALL on a background thread by default, which would offset used_memory.
+            wait_for_condition 50 100 {
+                [s lazyfree_pending_objects] == 0
+            } else {
+                fail "FLUSHALL was not freed"
+            }
+            # Compare growth between two sizes of the hash, so one-off server allocations (such as
+            # the client's query buffer) land on neither side.
+            for {set i 0} {$i < 2000} {incr i} {
+                r exhset big field:$i [string repeat x 12]
+            }
+            set used_before [s used_memory]
+            set reported_before [r memory usage big]
+            for {set i 2000} {$i < 4000} {incr i} {
+                r exhset big field:$i [string repeat x 12]
+            }
+            set allocated [expr {[s used_memory] - $used_before}]
+            set reported [expr {[r memory usage big] - $reported_before}]
+            assert_lessthan [expr {abs($reported - $allocated)}] [expr {$allocated / 10}]
+        }
+    }
+
     test {Exhdelwithver} {
         r del tairhashkey
 

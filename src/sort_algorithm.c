@@ -116,6 +116,10 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
             m_zslInsert(dbExpireIndex(dbid), ln2->score, key);
             ek->key = NULL;
         }
+        /* Deleting the key closed it. Left open, it would outlive a later delete of the same key. */
+        if (!deleted) {
+            RedisModule_CloseKey(real_key);
+        }
         releaseExpiringKey(keys, node);
     }
 
@@ -168,15 +172,16 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *up_key) {
         if (start_index) {
             m_zslDeleteRangeByRank(tair_hash_obj->expire_index, 1, start_index);
             deleted = delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj);
-            if (!deleted) {
-                RedisModule_CloseKey(real_key);
-            }
         }
 
         /* If there is still a field waiting to expire, hand the key name back to the global index. */
         if (!deleted && ln) {
             m_zslInsert(dbExpireIndex(dbid), ln->score, key);
             ek->key = NULL;
+        }
+        /* Deleting the key closed it. Left open, it would outlive a later delete of the same key. */
+        if (!deleted) {
+            RedisModule_CloseKey(real_key);
         }
         releaseExpiringKey(keys, node);
     }

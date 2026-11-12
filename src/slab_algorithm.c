@@ -147,6 +147,10 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
             m_zslInsert(dbExpireIndex(dbid), tair_hash_obj->expire_index->header->level[0].forward->expire_min, key);
             ek->key = NULL;
         }
+        /* Deleting the key closed it. Left open, it would outlive a later delete of the same key. */
+        if (!deleted) {
+            RedisModule_CloseKey(real_key);
+        }
         releaseExpiringKey(keys, node);
     }
     m_listRelease(keys);

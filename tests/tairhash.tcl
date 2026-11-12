@@ -2873,3 +2873,25 @@ start_server {tags {"tairhash lazyfree"} overrides {appendonly yes}} {
     }
 }
 
+start_server {tags {"tairhash passive-expire-handles"}} {
+    r module load $testmodule enable_active_expire 0
+
+    test {Passive expire closes a key it has no budget left for} {
+        # One passive expiry pass removes three fields: k1 takes them all, so k2 is opened and left
+        # as it is. The write then deletes k2, which must not still be open from that pass.
+        r del k1 k2
+        foreach f {a b c} {
+            r exhset k1 $f v PX 200
+        }
+        r exhset k2 f v PX 200
+        wait_for_condition 100 20 {
+            [r exhlen k2 noexp] == 0
+        } else {
+            fail "the fields did not expire"
+        }
+        assert_equal 0 [r exhsetver k2 f 5]
+        assert_equal 0 [r exists k2]
+        assert_equal PONG [r ping]
+    }
+}
+

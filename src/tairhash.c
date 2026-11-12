@@ -1169,6 +1169,7 @@ int TairHashTypeHmset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
             tair_hash_val = createTairHashVal();
             tair_hash_val->expire = 0;
         } else {
+            nokey = 0;
             if (tair_hash_val->value) {
                 RedisModule_FreeString(NULL, tair_hash_val->value);
             }

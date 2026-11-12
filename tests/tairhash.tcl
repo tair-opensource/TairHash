@@ -2938,3 +2938,23 @@ start_server {tags {"tairhash watch-active-expire"}} {
     }
 }
 
+start_server {tags {"tairhash exhmset"}} {
+    r module load $testmodule
+
+    test {EXHMSET keeps no copy of the name of a field it only updates} {
+        # A long name, so that a copy left behind in every round shows in used_memory.
+        set field [string repeat f 1000]
+        r del mk
+        for {set i 0} {$i < 1001} {incr i} {
+            # The first round is not measured: it sets the hash up and warms the server up.
+            if {$i == 1} {
+                set used_before [s used_memory]
+            }
+            r exhdel mk new
+            r exhmset mk new v $field v
+        }
+        assert {[s used_memory] - $used_before < 500000}
+        assert_equal 1001 [r exhver mk $field]
+    }
+}
+

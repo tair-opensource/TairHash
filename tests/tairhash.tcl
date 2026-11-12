@@ -3044,3 +3044,77 @@ start_server {tags {"tairhash client-pause"} overrides {appendonly yes}} {
     }
 }
 
+start_server {tags {"tairhash replay"} overrides {appendonly yes aof-use-rdb-preamble no}} {
+    r module load $testmodule enable_active_expire 0
+
+    # A server tells a module that it is loading since Redis 5.0.6, and that a command comes from
+    # its master since 5.0.4.
+    set server_version [split [s redis_version] .]
+    if {[lindex $server_version 0] > 5 || [lindex $server_version 2] >= 6} {
+        test {Fields do not expire while the AOF is loaded} {
+            r del k probe
+            # The AOF holds the write that gave f its TTL and the one that extended it. It is
+            # loaded after the first TTL has passed, which the probe, set later with the same TTL,
+            # shows.
+            r exhset k f v PX 1000
+            r exhset probe f v PX 1000
+            assert_equal 1 [r exhpexpire k f 100000]
+            wait_for_condition 200 20 {
+                [r exhlen probe noexp] == 0
+            } else {
+                fail "the first TTL did not pass"
+            }
+            r debug loadaof
+            assert_equal v [r exhget k f]
+            assert {[r exhpttl k f] > 90000}
+            # Loading left the expired probe alone; expiry takes it afterwards.
+            assert_equal 1 [r exhlen probe]
+            assert_equal {} [r exhget probe f]
+            assert_equal 0 [r exists probe]
+            r del k
+        }
+
+        start_server {} {
+            r module load $testmodule enable_active_expire 0
+            set master [srv 0 client]
+            set replica [srv -1 client]
+            $replica slaveof [srv 0 host] [srv 0 port]
+            wait_for_condition 50 100 {
+                [string match {*master_link_status:up*} [$replica info replication]]
+            } else {
+                fail "Can't turn the instance into a replica"
+            }
+
+            test {A replica applies its master's writes to a field its own clock has expired} {
+                $master del k
+                $master exhset k f v PX 1000
+                $master exhset k g v PX 1000
+                wait_for_condition 50 100 {
+                    [$replica exhlen k] == 2
+                } else {
+                    fail "the replica did not get the fields"
+                }
+                # The replica is held up past the TTL the fields have now, and so applies what the
+                # master did to them in time only after that TTL.
+                $replica deferred 1
+                $replica debug sleep 1.5
+                assert_equal 1 [$master exhpexpire k f 100000]
+                assert_equal 1 [$master exhpexpire k g 100000]
+                assert_equal 1 [$master exhsetver k g 9]
+                $replica read
+                $replica deferred 0
+                wait_for_condition 50 100 {
+                    [$replica exhver k g] == 9
+                } else {
+                    fail "the replica did not apply the master's writes"
+                }
+                assert_equal v [$replica exhget k f]
+                assert {[$replica exhpttl k f] > 90000}
+                assert_equal [$master exhver k f] [$replica exhver k f]
+                $master del k
+                $replica slaveof no one
+            }
+        }
+    }
+}
+

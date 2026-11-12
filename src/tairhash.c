@@ -252,19 +252,41 @@ void tairHashEnsureExpireIndex(tairHashObj *o) {
 #endif
 }
 
-int isReadOnlyStatus(RedisModuleCtx *ctx) {
+/* What field expiry may do for the command or the timer that runs in ctx. */
+enum {
+    FIELD_EXPIRY_DELETE, /* an expired field is deleted and the deletion replicated */
+    FIELD_EXPIRY_HIDE,   /* an expired field counts as absent and is left where it is */
+    FIELD_EXPIRY_OFF,    /* no field counts as expired */
+};
+
+static int fieldExpiry(RedisModuleCtx *ctx) {
     int flags = RedisModule_GetContextFlags(ctx);
+
+    /* A command read back from the AOF, or applied by a replica from its master, runs for the
+     * second time. Where it first ran, each field was live or expired by the clock of that
+     * moment, and every field that expired there is deleted by an EXHDEL or DEL of its own in
+     * the same stream. Here the command has to find the fields it found there, whatever the time
+     * is now. A server that does not report these flags (LOADING came with Redis 5.0.6,
+     * REPLICATED with 5.0.4) goes on judging by its own clock. */
+    if (flags & (REDISMODULE_CTX_FLAGS_LOADING | REDISMODULE_CTX_FLAGS_REPLICATED)) {
+        return FIELD_EXPIRY_OFF;
+    }
+
     if (flags & REDISMODULE_CTX_FLAGS_SLAVE || flags & REDISMODULE_CTX_FLAGS_READONLY) {
-        return 1;
+        return FIELD_EXPIRY_HIDE;
     }
 
     /* While clients are paused, as for a failover, the dataset has to stay as it is, and the
      * server asserts that nothing is propagated. Servers before Redis 6.0 cannot tell. */
     if (RedisModule_AvoidReplicaTraffic && RedisModule_AvoidReplicaTraffic()) {
-        return 1;
+        return FIELD_EXPIRY_HIDE;
     }
 
-    return 0;
+    return FIELD_EXPIRY_DELETE;
+}
+
+int isReadOnlyStatus(RedisModuleCtx *ctx) {
+    return fieldExpiry(ctx) != FIELD_EXPIRY_DELETE;
 }
 
 /* ========================== Common  func =============================*/
@@ -321,8 +343,8 @@ restart:
 
 /* Expires `field` of o if its TTL has passed and returns whether it has: 1 for a field that was
  * deleted, and also for one that is only hidden because nothing may be deleted here (see
- * isReadOnlyStatus). A caller that passes is_timer takes out of the expire index what it gets 1
- * for, so for it 1 means deleted and nothing else. */
+ * fieldExpiry). A caller that passes is_timer takes out of the expire index what it gets 1 for,
+ * so for it 1 means deleted and nothing else. */
 int fieldExpireIfNeeded(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, int is_timer) {
     TairHashVal *tair_hash_val = m_dictFetchValue(o->hash, field);
     if (tair_hash_val == NULL) {
@@ -334,8 +356,13 @@ int fieldExpireIfNeeded(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, t
         return 0;
     }
 
+    int expiry = fieldExpiry(ctx);
+    if (expiry == FIELD_EXPIRY_OFF) {
+        return 0;
+    }
+
     long long now = RedisModule_Milliseconds();
-    if (isReadOnlyStatus(ctx)) {
+    if (expiry == FIELD_EXPIRY_HIDE) {
         return is_timer ? 0 : now > when;
     }
 

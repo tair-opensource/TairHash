@@ -2751,7 +2751,16 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
 
     tairHashObj *o = createTairHashTypeObject();
     uint64_t len = RedisModule_LoadUnsigned(rdb);
-    o->key = RedisModule_LoadString(rdb);
+    /* The payload holds the name the key had when it was saved. RESTORE can load it under
+     * another name, and the db expire index must track the name the key has now. */
+    RedisModuleString *saved_key = RedisModule_LoadString(rdb);
+    const RedisModuleString *loading_key = RedisModule_GetKeyNameFromIO ? RedisModule_GetKeyNameFromIO(rdb) : NULL;
+    if (loading_key) {
+        o->key = RedisModule_CreateStringFromString(NULL, loading_key);
+        RedisModule_FreeString(NULL, saved_key);
+    } else {
+        o->key = saved_key;
+    }
 
     int dbid = RedisModule_GetDbIdFromIO ? RedisModule_GetDbIdFromIO(rdb) : 0;
 

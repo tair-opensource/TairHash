@@ -516,6 +516,28 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal 0 [r dbsize]  
     }
 
+    test {RESTORE under another name tracks the new name} {
+        r select 11
+        r del rk rk2
+        r exhset rk f1 v EX 100
+        r exhset rk f2 v PX 300
+        r restore rk2 0 [r dump rk]
+        # The copy's expire index entries must be found under its own name.
+        assert_equal 1 [r exhdel rk2 f1]
+        assert_equal 1 [r exhdel rk f1]
+        # Reuse the source name for another type; active expire must still reach the copy.
+        r del rk
+        r set rk str
+        wait_for_condition 50 100 {
+            [r exists rk2] == 0
+        } else {
+            fail "rk2 was not actively expired"
+        }
+        assert_equal str [r get rk]
+        r del rk
+        r select 8
+    }
+
     test {Rename and move keys of other types} {
         r select 11
         r del strkey strkey2

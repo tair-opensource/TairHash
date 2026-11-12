@@ -2552,6 +2552,20 @@ start_server {tags {"tairhash passive-expire"}} {
         r del other
     }
 
+    test {EXHSETNX treats an expired field as absent} {
+        r select 12
+        r del nx
+        # More expired fields than one passive expiry pass removes.
+        for {set i 1} {$i <= 5} {incr i} {
+            r exhset nx f$i v PX [expr {40 + $i}]
+        }
+        after 200
+        assert_equal 1 [r exhsetnx nx f5 new]
+        assert_equal new [r exhget nx f5]
+        assert_equal 0 [r exhsetnx nx f5 newer]
+        r del nx
+    }
+
     start_server {} {
         r module load $testmodule enable_active_expire 0
         set master [srv 0 client]

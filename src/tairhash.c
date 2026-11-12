@@ -1103,6 +1103,8 @@ int TairHashTypeHsetNx_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **arg
         tair_hash_obj = RedisModule_ModuleTypeGetValue(key);
     }
 
+    /* An expired field is absent, even before expiry has removed it. */
+    fieldExpireIfNeeded(ctx, RedisModule_GetSelectedDb(ctx), pkey, tair_hash_obj, skey, 0);
     TairHashVal *tair_hash_val = (TairHashVal *)m_dictFetchValue(tair_hash_obj->hash, skey);
     if (tair_hash_val == NULL) {
         tair_hash_val = createTairHashVal();

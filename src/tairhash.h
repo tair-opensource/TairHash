@@ -50,7 +50,6 @@
 
 #define UNIT_SECONDS 0
 #define UNIT_MILLISECONDS 1
-#define DB_NUM 16 /* This value must be equal to the db_dum of redis. */
 
 #define TAIR_HASH_ACTIVE_EXPIRE_PERIOD 1000
 #define TAIR_HASH_ACTIVE_EXPIRE_KEYS_PER_LOOP 1000
@@ -103,8 +102,9 @@ typedef struct ExpireAlgorithm {
     uint64_t dbs_per_active_loop;
     uint64_t keys_per_active_loop;
     uint64_t keys_per_passive_loop;
-    uint64_t stat_active_expired_field[DB_NUM];
-    uint64_t stat_passive_expired_field[DB_NUM];
+    int db_num; /* databases of the server, counted at load; the arrays below have one entry per db */
+    uint64_t *stat_active_expired_field;
+    uint64_t *stat_passive_expired_field;
     uint64_t stat_last_active_expire_time_msec;
     uint64_t stat_avg_active_expire_time_msec;
     uint64_t stat_max_active_expire_time_msec;
@@ -121,6 +121,10 @@ int isReadOnlyStatus(RedisModuleCtx *ctx);
 int fieldExpireIfNeeded(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, int is_timer);
 
 #if defined(SORT_MODE) || defined(SLAB_MODE)
+/* One per database, NULL until the db gets an expiring field; use dbExpireIndex. */
+extern m_zskiplist **g_expire_index;
+m_zskiplist *dbExpireIndex(int dbid);
+
 /* An entry taken out of a db expire index: the key name it held and its score. */
 typedef struct expiringKey {
     RedisModuleString *key;

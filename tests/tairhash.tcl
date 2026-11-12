@@ -2748,3 +2748,85 @@ start_server {tags {"tairhash failed-writes"}} {
     }
 }
 
+start_server {tags {"tairhash databases"} overrides {databases 32}} {
+    r module load $testmodule
+
+    test {Fields expire in databases past the 16th} {
+        r select 20
+        r del k
+        r exhset k f v PX 100
+        r exhset k g v
+        wait_for_condition 50 100 {
+            [r exhlen k] == 1
+        } else {
+            fail "the field in db 20 was not actively expired"
+        }
+        assert_match {*db: 20, active_expired_fields: 1,*} [r exhexpireinfo]
+
+        r select 31
+        r del m
+        r exhset m f v PX 300
+        r move m 25
+        r select 25
+        wait_for_condition 50 100 {
+            [r exists m] == 0
+        } else {
+            fail "the field moved to db 25 was not actively expired"
+        }
+        r flushall
+        r select 9
+    }
+
+    start_server {overrides {databases 10}} {
+        # A tick may visit 160 databases and there are 10.
+        r module load $testmodule active_expire_keys_per_loop 100 active_expire_dbs_per_loop 160
+
+        test {A tick of active expire visits each database once} {
+            # 1300 fields that expire together. One visit expires the 100 fields of its budget in
+            # scan and sort mode and one slab in slab mode, so the first tick after that must leave
+            # fields behind.
+            set args {}
+            for {set i 0} {$i < 1300} {incr i} {
+                lappend args f$i v 0 1
+            }
+            r exhmsetwithopts k {*}$args
+            wait_for_condition 100 50 {
+                [set left [r exhlen k]] < 1300
+            } else {
+                fail "no field was actively expired"
+            }
+            assert {$left > 0}
+        }
+    }
+
+    start_server {overrides {databases 17000}} {
+        # One tick visits every database.
+        r module load $testmodule active_expire_dbs_per_loop 17000
+
+        test {EXHEXPIREINFO reports every database} {
+            # One line per database that expired a field: more than a megabyte of them.
+            set dbs 17000
+            for {set i 0} {$i < $dbs} {incr i} {
+                r select $i
+                r exhset k f v PX 1
+            }
+            r select 9
+            wait_for_condition 200 100 {
+                [regexp -all {db: } [r exhexpireinfo]] == $dbs
+            } else {
+                fail "not every database reported an expired field"
+            }
+            assert_match "*db: [expr {$dbs - 1}], active_expired_fields: 1, passive_expired_fields: 0*" [r exhexpireinfo]
+        }
+    }
+
+    start_server {} {
+        test {A module load that rejects its arguments allocates nothing} {
+            # What a rejected load left allocated would be unreachable. The leak check and the
+            # sanitizers of the test servers report it when this server exits.
+            assert_error "*" {r module load $testmodule no_such_option 1}
+            assert_equal PONG [r ping]
+        }
+    }
+}
+

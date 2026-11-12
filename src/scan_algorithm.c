@@ -66,7 +66,10 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
     list *keys = m_listCreate();
     /* Each db has its own cursor, but this value may be wrong when swapdb appears (because we do not have a callback notification),
      * But this will not cause serious problems. */
-    static long long scan_cursor[DB_NUM] = {0};
+    static long long *scan_cursor = NULL;
+    if (scan_cursor == NULL) {
+        scan_cursor = RedisModule_Calloc(g_expire_algorithm.db_num, sizeof(*scan_cursor));
+    }
     RedisModuleCallReply *reply = RedisModule_Call(ctx, "SCAN", "lcl", scan_cursor[dbid], "COUNT", g_expire_algorithm.keys_per_active_loop);
     if (reply != NULL) {
         switch (RedisModule_CallReplyType(reply)) {

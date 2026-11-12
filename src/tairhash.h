@@ -115,6 +115,7 @@ void tairHashEnsureExpireIndex(tairHashObj *o);
 int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *raw_key, tairHashObj *obj);
 void notifyFieldSpaceEvent(char *event, RedisModuleString *key, RedisModuleString *field, int dbid);
 int isExpire(long long when);
+int isReadOnlyStatus(RedisModuleCtx *ctx);
 int fieldExpireIfNeeded(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, int is_timer);
 
 #if defined(SORT_MODE) || defined(SLAB_MODE)

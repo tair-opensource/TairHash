@@ -125,6 +125,11 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
 
 void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *up_key) {
     REDISMODULE_NOT_USED(up_key);
+    /* A replica sees expired fields but does not delete them; it gets the master's deletions.
+     * Taking their entries out of the indexes here would leave those deletions nothing to remove. */
+    if (isReadOnlyStatus(ctx)) {
+        return;
+    }
     int keys_per_loop = g_expire_algorithm.keys_per_passive_loop;
     int start_index = 0;
     m_zskiplistNode *ln = NULL;

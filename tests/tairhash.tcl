@@ -2548,5 +2548,35 @@ start_server {tags {"tairhash passive-expire"}} {
         assert_equal 0 [r exists k3]
         r del other
     }
-}
 
+    start_server {} {
+        r module load $testmodule enable_active_expire 0
+        set master [srv 0 client]
+        set replica [srv -1 client]
+        $replica slaveof [srv 0 host] [srv 0 port]
+        wait_for_condition 50 100 {
+            [string match {*master_link_status:up*} [$replica info replication]]
+        } else {
+            fail "Can't turn the instance into a replica"
+        }
+
+        test {Passive expire on a replica leaves deletions to the master} {
+            $master select 13
+            $master del k
+            for {set i 1} {$i <= 5} {incr i} {
+                $master exhset k f$i v PX 150
+            }
+            $master wait 1 5000
+            after 400
+            # The writes run passive expiry on the master, which replicates the deletions; the replica
+            # runs the same writes and must leave its expire index for those deletions.
+            for {set i 1} {$i <= 3} {incr i} {
+                $master exhsetnx other$i f v
+            }
+            $master wait 1 5000
+            assert_equal PONG [$replica ping]
+            assert_equal [$master debug digest] [$replica debug digest]
+            $replica slaveof no one
+        }
+    }
+}

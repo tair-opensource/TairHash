@@ -3664,7 +3664,10 @@ int __attribute__((visibility("default"))) RedisModule_OnLoad(RedisModuleCtx *ct
 
 #if defined(SORT_MODE) || defined(SLAB_MODE)
     if (redis_major_ver < 7) {
-        RedisModule_Log(ctx, "warning", "Redis version (%d.%d.%d) is too old, please upgrade to 7.0.0 or above", redis_major_ver, redis_minor_ver, redis_patch_ver);
+        RedisModule_Log(ctx, "warning",
+                        "Redis version (%d.%d.%d) is too old for the sort and slab expire modes: upgrade to 7.0.0 or above, or build with "
+                        "-DTAIRHASH_EXPIRE_MODE=scan",
+                        redis_major_ver, redis_minor_ver, redis_patch_ver);
         return REDISMODULE_ERR;
     }
 #endif

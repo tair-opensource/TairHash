@@ -53,17 +53,44 @@ set(CMAKE_C_VISIBILITY_PRESET hidden)
 
 SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)  
 
-option(SORT_MODE "Use two-level sort index to to implement active expire" OFF)
+# Active expire algorithm. sort and slab need Redis/Valkey 7.0+; scan also runs on Redis 5.0 and 6.x.
+set(TAIRHASH_EXPIRE_MODE "" CACHE STRING "Active expire algorithm: sort (default), slab or scan")
+set_property(CACHE TAIRHASH_EXPIRE_MODE PROPERTY STRINGS sort slab scan)
 
+# SORT_MODE and SLAB_MODE selected the algorithm before TAIRHASH_EXPIRE_MODE did, and a build with
+# both off was scan, so an explicit OFF still means scan rather than the new default.
+if(SORT_MODE AND SLAB_MODE)
+    message(FATAL_ERROR "SORT_MODE and SLAB_MODE are mutually exclusive: set TAIRHASH_EXPIRE_MODE instead")
+endif()
+set(TAIRHASH_LEGACY_EXPIRE_MODE "")
 if(SORT_MODE)
-add_definitions(-DSORT_MODE)
-endif(SORT_MODE)
+    set(TAIRHASH_LEGACY_EXPIRE_MODE sort)
+elseif(SLAB_MODE)
+    set(TAIRHASH_LEGACY_EXPIRE_MODE slab)
+elseif(DEFINED SORT_MODE OR DEFINED SLAB_MODE)
+    set(TAIRHASH_LEGACY_EXPIRE_MODE scan)
+endif()
+if(NOT TAIRHASH_LEGACY_EXPIRE_MODE STREQUAL "")
+    if(TAIRHASH_EXPIRE_MODE STREQUAL "")
+        message(DEPRECATION "SORT_MODE and SLAB_MODE are deprecated: use -DTAIRHASH_EXPIRE_MODE=${TAIRHASH_LEGACY_EXPIRE_MODE}")
+        set(TAIRHASH_EXPIRE_MODE ${TAIRHASH_LEGACY_EXPIRE_MODE})
+    elseif((SORT_MODE OR SLAB_MODE) AND NOT TAIRHASH_EXPIRE_MODE STREQUAL TAIRHASH_LEGACY_EXPIRE_MODE)
+        message(FATAL_ERROR "SORT_MODE/SLAB_MODE select ${TAIRHASH_LEGACY_EXPIRE_MODE}, which conflicts with TAIRHASH_EXPIRE_MODE=${TAIRHASH_EXPIRE_MODE}")
+    endif()
+endif()
+# Compared as a string: if(NOT <variable>) would also take values such as "off" for unset.
+if(TAIRHASH_EXPIRE_MODE STREQUAL "")
+    set(TAIRHASH_EXPIRE_MODE sort)
+endif()
 
-option(SLAB_MODE "Use a memory friendly slab-based expiration algorithm to evict expired keys more efficient!" OFF)
-
-if (SLAB_MODE)
-add_definitions(-DSLAB_MODE)
-endif(SLAB_MODE)
+if(TAIRHASH_EXPIRE_MODE STREQUAL "sort")
+    add_definitions(-DSORT_MODE)
+elseif(TAIRHASH_EXPIRE_MODE STREQUAL "slab")
+    add_definitions(-DSLAB_MODE)
+elseif(NOT TAIRHASH_EXPIRE_MODE STREQUAL "scan")
+    message(FATAL_ERROR "TAIRHASH_EXPIRE_MODE must be sort, slab or scan, not '${TAIRHASH_EXPIRE_MODE}'")
+endif()
+message(STATUS "TairHash active expire mode: ${TAIRHASH_EXPIRE_MODE}")
 
 include_directories(${ROOT_DIR}/dep)
 include_directories(${ROOT_DIR}/src)

@@ -40,8 +40,8 @@
 **优点**：可以运行在低版本的redis中（redis >= 5.0 ）      
 **缺点**：过期淘汰效率较低（相对SORT模式而言，特别是redis中含有过多的干扰key时）  
 
-**使用方式**：以默认选项执行cmake，并重新编译
-### SORT_MODE（排序模式）：
+**使用方式**：cmake的时候加上`-DTAIRHASH_EXPIRE_MODE=scan`选项，并重新编译
+### SORT_MODE（排序模式，默认）：
 
 - 使用两级排序索引，第一级对tairhash主key进行排序，第二级针对每个tairhash内部的field进行排序
 - 第一级排序使用第二级排序里最小的ttl进行排序，因此主key是按照ttl全局有序的
@@ -52,7 +52,7 @@
 **优点**：过期淘汰效率比较高      
 **缺点**：更多的内存消耗  
 
-**使用方式**：cmake的时候加上`-DSORT_MODE=yes`选项，并重新编译
+**使用方式**：默认模式；也可以用`-DTAIRHASH_EXPIRE_MODE=sort`显式指定
 ### SLAB_MODE（slab模式）：
 
 - SLAB模式是一种节省内存，缓存友好，高性能的过期算法
@@ -65,7 +65,7 @@
 
 **缺点**：更多的内存消耗  
 
-**使用方式**：cmake的时候加上`-DSLAB_MODE=yes`选项，并重新编译
+**使用方式**：cmake的时候加上`-DTAIRHASH_EXPIRE_MODE=slab`选项，并重新编译
 
 ## 主动过期
 - 每一次读写field，会触发对这个field自身的过期淘汰操作  
@@ -152,11 +152,11 @@ cmake ../ && make -j
 ```
 ./redis-server --loadmodule /path/to/tairhash_module.so
 ```  
-编译选项（`cmake -D<选项>=ON ../`）：
+编译选项（`cmake -D<选项>=<值> ../`）：
 
 | 选项 | 默认值 | 说明 |
 |---|---|---|
-| `SORT_MODE` / `SLAB_MODE` | `OFF` | 主动过期算法（默认SCAN模式） |
+| `TAIRHASH_EXPIRE_MODE` | `sort` | 主动过期算法：`sort`、`slab` 或 `scan`。`sort` 和 `slab` 需要 Redis 7.0+ 或 Valkey；`scan` 也可以运行在 Redis 5.0 和 6.x 上。`SORT_MODE` 和 `SLAB_MODE` 已不推荐使用，但在未设置 `TAIRHASH_EXPIRE_MODE` 时仍然有效：`ON` 选择对应模式，显式设为 `OFF` 则与以前一样编译为 `scan`。 |
 | `TAIRHASH_NATIVE_ARCH` | `OFF` | 针对编译机器的CPU优化（`-march=native`）。仅适用于在运行机器上编译：这样编译的二进制在其他CPU上可能因SIGILL崩溃，例如在CI上构建的Docker镜像。SLAB模式无需开启即可在运行时选择AVX2路径。 |
 | `TAIRHASH_LTO` | `OFF` | 链接时优化 |
 | `SANITIZER_MODE` | 未设置 | `address`、`undefined` 或 `thread` |
@@ -187,6 +187,8 @@ TairHash 2.0把每次写入复制为一条 `EXHMSETREPL` 或 `EXHMETAREPL`，Tai
 降级时，先将所有节点切换回 `compat`，再在每个节点上执行 `BGREWRITEAOF` 使其AOF中不再包含 `EXHMSETREPL` 或 `EXHMETAREPL`，然后替换模块。仍处于 `state` 的节点会把从主节点应用的写入以state格式写入自己的AOF。在Redis 7.0+和Valkey上，升级期间设置 `propagation-error-behavior panic-on-replicas` 可以让无法应用复制流的从节点直接停止，而不是静默地产生数据不一致。
 
 `EXHSETNX` 现在与 `EXHSET` 一样，新field的版本从1开始；1.x中为0，导致之后的 `VER` 检查除0以外对任何版本都会失败。来自复制流或AOF的 `EXHSETNX` 仍然把field的版本置为0：这正是1.x主节点和 `compat` 格式用它表达的含义。在早于Redis 6.0.9的服务端上，模块无法判断命令的来源，此时版本同样从1开始。
+
+默认编译现在使用SORT模式而不是SCAN模式，因此不再能加载到Redis 7.0以下的版本：这些版本请使用 `-DTAIRHASH_EXPIRE_MODE=scan` 编译。切换模式不需要迁移数据，所有模式的RDB编码相同。
 
 ## 测试方法
 

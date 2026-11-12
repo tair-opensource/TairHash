@@ -82,7 +82,7 @@ Profiles and command stats are written under `<out>/master/` and `<out>/replica/
 ## Build, Run, Test
 
 ```
-mkdir -p build && (cd build && cmake ../ && make -j)           # the module: lib/tairhash_module.so
+mkdir -p build && (cd build && cmake ../ -DTAIRHASH_EXPIRE_MODE=scan && make -j)   # the module: lib/tairhash_module.so
 git clone --depth 1 --branch 7.0 https://github.com/redis/redis .deps/redis-7.0
 make -C .deps/redis-7.0 -j4                                    # the server, redis-cli and hiredis
 bench/profile.sh --workload gt                                 # single-field write path

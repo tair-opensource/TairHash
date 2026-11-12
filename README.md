@@ -36,7 +36,7 @@ count the key's entry in the per-database expire index of SORT_MODE and SLAB_MOD
 skiplist node and a copy of the key name (about 130 bytes for a short name).
 
 ## Active expiration
-### SCAN_MODE(default):
+### SCAN_MODE:
 - Do not sort TairHash globally (Smaller memory overhead)
 - Each TairHash will still use a sort index to sort the fields internally (For expiration efficiency)
 - The built-in timer will periodically use the SCAN command to find the TairHash that contains the expired field, and then check the sort index inside the TairHash to eliminate the field
@@ -49,9 +49,9 @@ skiplist node and a copy of the key name (about 130 bytes for a short name).
 
 **Disadvantages**: low efficiency of expire elimination (compared with SORT mode and SLAB mode)  
 
-**Usage**: cmake with default option, and recompile
+**Usage**: cmake with `-DTAIRHASH_EXPIRE_MODE=scan`, and recompile
 
-### SORT_MODE：
+### SORT_MODE (default):
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
 - The first-level uses the smallest ttl in the second-level for sorting, so the main key is globally ordered
 - The built-in timer will periodically scan the first-level index to find out a key that has expired, and then check the secondary index of these keys to eliminate the expired fields. This is the active expire
@@ -63,7 +63,7 @@ skiplist node and a copy of the key name (about 130 bytes for a short name).
 
 **Disadvantages**: More memory consumption  
 
-**Usag**e: cmake with `-DSORT_MODE=yes` option, and recompile
+**Usage**: the default build; `-DTAIRHASH_EXPIRE_MODE=sort` selects it explicitly
 
 ### SLAB_MODE：  
 - Slab mode is a low memory usage (compared with SORT mode), cache-friendly, high-performance expiration algorithm
@@ -76,7 +76,7 @@ skiplist node and a copy of the key name (about 130 bytes for a short name).
 
 **Disadvantages**: More memory consumption    
 
-**Usage**: cmake with `-DSLAB_MODE=yes` option, and recompile
+**Usage**: cmake with `-DTAIRHASH_EXPIRE_MODE=slab`, and recompile
 
 ## Passivity expiration  
 - Every time you read or write a field, it will also trigger the expiration of the field itself  
@@ -161,11 +161,11 @@ cmake ../ && make -j
 ```
 then the tairhash_module.so library file will be generated in the lib directory
 
-Build options (`cmake -D<option>=ON ../`):
+Build options (`cmake -D<option>=<value> ../`):
 
 | Option | Default | Description |
 |---|---|---|
-| `SORT_MODE` / `SLAB_MODE` | `OFF` | Active expire algorithm (default: SCAN mode) |
+| `TAIRHASH_EXPIRE_MODE` | `sort` | Active expire algorithm: `sort`, `slab` or `scan` (see [Active expiration](#active-expiration)). `sort` and `slab` need Redis 7.0+ or Valkey; `scan` also runs on Redis 5.0 and 6.x. `SORT_MODE` and `SLAB_MODE` are deprecated but still honoured when `TAIRHASH_EXPIRE_MODE` is not set: `ON` selects that mode, and an explicit `OFF` builds `scan`, as it did before. |
 | `TAIRHASH_NATIVE_ARCH` | `OFF` | Optimize for the build host's CPU (`-march=native`). Only for a library built on the host that runs it: a binary built this way can crash with SIGILL on another CPU, for example a Docker image built on a CI runner. SLAB mode picks its AVX2 path at runtime without it. |
 | `TAIRHASH_LTO` | `OFF` | Link-time optimization |
 | `SANITIZER_MODE` | unset | `address`, `undefined` or `thread` |
@@ -220,6 +220,10 @@ later `VER` check failed for every version but 0. Applied from the replication s
 the AOF, `EXHSETNX` still leaves the field at version 0: that is what a 1.x master and the
 `compat` format mean by it. On a server older than Redis 6.0.9 the module cannot tell where
 a command comes from, and the field starts at version 1 there too.
+
+A default build now uses SORT mode instead of SCAN mode, so it no longer loads on servers older
+than Redis 7.0: build those with `-DTAIRHASH_EXPIRE_MODE=scan`. Switching modes needs no data
+migration, since the RDB encoding is the same in every mode.
 ## TEST
 
 1. Modify the path in the tairhash.tcl file in the `tests` directory to `set testmodule [file your_path/tairhash_module.so]`

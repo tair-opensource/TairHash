@@ -2277,9 +2277,13 @@ int TairHashTypeHdelRepl_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **a
     TairHashVal *tair_hash_val = NULL;
     m_dictEntry *de = m_dictFind(tair_hash_obj->hash, argv[2]);
     if (de) {
+        tair_hash_val = dictGetVal(de);
+        /* A field with a TTL leaves the expire indexes with the hash table. */
+        g_expire_algorithm.delete(ctx, dbid, argv[1], tair_hash_obj, argv[2], tair_hash_val->expire);
         m_dictDelete(tair_hash_obj->hash, argv[2]);
         RedisModule_Replicate(ctx, "EXHDEL", "ss", argv[1], argv[2]);
         deleted++;
+        delEmptyTairHashIfNeeded(ctx, key, argv[1], tair_hash_obj);
     }
 
     RedisModule_ReplyWithLongLong(ctx, deleted);

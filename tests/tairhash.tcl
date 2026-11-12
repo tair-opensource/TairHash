@@ -2958,3 +2958,33 @@ start_server {tags {"tairhash exhmset"}} {
     }
 }
 
+start_server {tags {"tairhash exhdelrepl"}} {
+    r module load $testmodule
+
+    test {EXHDELREPL takes the field out of the expire index} {
+        # b expires after a. If a were left in the index when it is deleted, active expire would
+        # find a field that is gone at the head of the index and never get to b.
+        r del k
+        r exhset k a v PX 1000
+        r exhset k b v PX 1200
+        r exhset k keep v
+        r exhdelrepl k a
+        wait_for_condition 100 100 {
+            [r exhlen k] == 1
+        } else {
+            fail "b was not actively expired"
+        }
+        assert_equal v [r exhget k keep]
+        r del k
+    }
+
+    test {EXHDELREPL deletes the key with its last field} {
+        r del k
+        r exhset k a v EX 100
+        r exhset k b v
+        assert_equal 1 [r exhdelrepl k a]
+        assert_equal 1 [r exhdelrepl k b]
+        assert_equal 0 [r exists k]
+    }
+}
+

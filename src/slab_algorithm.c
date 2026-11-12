@@ -77,70 +77,24 @@ void delete(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
 void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
     tairHashObj *tair_hash_obj = NULL;
     int start_index;
-    m_zskiplistNode *ln = NULL;
     tairhash_zskiplistNode *ln2 = NULL;
-    RedisModuleString *key, *field;
+    RedisModuleString *key;
     RedisModuleKey *real_key;
 
-    long long when, now;
-    unsigned long zsl_len;
-
     int expire_keys_per_loop = keys_per_loop;
-    list *keys = m_listCreate();
+    list *keys = popDueExpireIndexEntries(dbid, RedisModule_Milliseconds(), keys_per_loop);
 
-    /* 1. The current db does not have a key that needs to expire. */
-    zsl_len = g_expire_index[dbid]->length;
-    if (zsl_len == 0) {
-        m_listRelease(keys);
-        return;
-    }
-
-    /* 2. Enumerates expired keys. */
-    ln = g_expire_index[dbid]->header->level[0].forward;
-    start_index = 0;
-    while (ln && expire_keys_per_loop--) {
-        key = ln->member;
-        when = ln->score;
-        now = RedisModule_Milliseconds();
-        if (when > now) {
-            break;
-        }
-        start_index++;
-        /* The list takes over the index's copy of the key name, so the range delete frees only the nodes. */
-        m_listAddNodeTail(keys, key);
-        ln->member = NULL;
-        ln = ln->level[0].forward;
-    }
-
-    if (start_index) {
-        /* It is assumed that these keys will all be deleted. */
-        m_zslDeleteRangeByRank(g_expire_index[dbid], 1, start_index);
-    }
-
-    if (listLength(keys) == 0) {
-        m_listRelease(keys);
-        return;
-    }
-
-    /* SLAB_MODE:3. Delete expired field. */
-    expire_keys_per_loop = keys_per_loop;
+    /* Delete expired fields. */
     m_listNode *node;
     int ontime_num = 0, timeout_num = 0, timeout_index = 0, delete_rank = 0, j;
     while ((node = listFirst(keys)) != NULL) {
-        key = listNodeValue(node);
-        real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE | REDISMODULE_OPEN_KEY_NOTOUCH);
-        int type = RedisModule_KeyType(real_key);
-        if (type != REDISMODULE_KEYTYPE_EMPTY) {
-            Module_Assert(RedisModule_ModuleTypeGetType(real_key) == TairHashType);
-        } else {
-            RedisModule_FreeString(NULL, key);
-            m_listDelNode(keys, node);
+        expiringKey *ek = listNodeValue(node);
+        tair_hash_obj = openIndexedTairHash(ctx, ek, REDISMODULE_READ | REDISMODULE_WRITE | REDISMODULE_OPEN_KEY_NOTOUCH, &real_key);
+        if (tair_hash_obj == NULL) {
+            releaseExpiringKey(keys, node);
             continue;
         }
-        tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
-
-        zsl_len = tair_hash_obj->expire_index->length;
-        Module_Assert(zsl_len > 0);
+        key = ek->key;
 
         ln2 = tair_hash_obj->expire_index->header->level[0].forward;
         /* The split counts describe this key's first unfinished slab. When the per-loop budget is
@@ -192,12 +146,9 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
          * including when the per-loop budget ran out before any of them were processed. */
         if (!deleted && tair_hash_obj->expire_index->length > 0) {
             m_zslInsert(g_expire_index[dbid], tair_hash_obj->expire_index->header->level[0].forward->expire_min, key);
-        } else {
-            RedisModule_FreeString(NULL, key);
+            ek->key = NULL;
         }
-
-        m_listDelNode(keys, node);
-        start_index = 0;
+        releaseExpiringKey(keys, node);
     }
     m_listRelease(keys);
 }

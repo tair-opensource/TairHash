@@ -2448,3 +2448,105 @@ start_server {tags {"tairhash active-expire-budget"}} {
         assert_equal PONG [r ping]
     }
 }
+
+start_server {tags {"tairhash passive-expire"}} {
+    # Without active expire only passive expiry and lazy reads remove fields, and the server's
+    # own key expiry runs only when a key is accessed.
+    r module load $testmodule enable_active_expire 0
+    r debug set-active-expire 0
+
+    test {Passive expire skips a key that its own TTL removed} {
+        r select 12
+        r del k1 other
+        r exhset k1 f v PX 100
+        r pexpire k1 100
+        after 300
+        assert_equal 1 [r exhset other f v]
+        assert_equal 0 [r exists k1]
+        r del other
+    }
+
+    test {Expire index entries of a key dropped while loading are skipped} {
+        r select 12
+        r flushdb
+        r exhset k2 f v PX 200
+        r pexpire k2 50
+        after 100
+        # k2 is saved with an expired key TTL and dropped while loading, after its field was indexed.
+        r debug reload
+        assert_equal 0 [r exists k2]
+        r set k2 str
+        after 300
+        assert_equal 1 [r exhset other f v]
+        assert_equal str [r get k2]
+        r del k2 other
+    }
+
+    # The DUMP payload of a TairHash with one field whose version and expire are the given 64-bit
+    # values, as 16 hex digits each. Commands cannot store every value a payload can carry.
+    proc tairhash_payload {version expire} {
+        # Values this large are saved as 0x81 and their 8 bytes, which are replaced in the dump.
+        set version_mark 1234567890abcdf1
+        set expire_mark 1234567890abcdf0
+        r del payloadsrc
+        r exhset payloadsrc f v PXAT [expr 0x$expire_mark] ABS [expr 0x$version_mark]
+        set body [string range [r dump payloadsrc] 0 end-8]
+        r del payloadsrc
+        foreach {mark value} [list $version_mark $version $expire_mark $expire] {
+            set at [string first [binary format H* 81$mark] $body]
+            set body [string replace $body [expr {$at + 1}] [expr {$at + 8}] [binary format H* $value]]
+        }
+        # The payload ends with the CRC64 of everything before it.
+        set crc 0
+        binary scan $body cu* bytes
+        foreach byte $bytes {
+            set crc [expr {$crc ^ $byte}]
+            for {set bit 0} {$bit < 8} {incr bit} {
+                set crc [expr {($crc >> 1) ^ (($crc & 1) ? 0x95AC9329AC4BC9B5 : 0)}]
+            }
+        }
+        return $body[binary format w $crc]
+    }
+
+    start_server {} {
+        r module load $testmodule
+
+        test {A stored expire of -1 does not stand for a hash without expiring fields} {
+            r del plain rk probe
+            r exhset plain f v
+            # rk has a field whose expire is -1. Renaming over rk must take its expire index entry
+            # with it, or active expire finds that entry naming a hash that has no index at all.
+            set payload [tairhash_payload 0000000000000001 ffffffffffffffff]
+            r multi
+            r restore rk 0 $payload
+            r rename plain rk
+            r exec
+            r exhset probe f v PX 1
+            wait_for_condition 100 50 {
+                [r exists probe] == 0
+            } else {
+                fail "active expire did not run"
+            }
+            assert_equal v [r exhget rk f]
+            r del rk
+        }
+    }
+
+    test {A stale expire index entry does not shadow a later TairHash of the same name} {
+        r select 12
+        r flushdb
+        r exhset k3 f v PX 200
+        r pexpire k3 50
+        after 100
+        r debug reload
+        r exhset k3 g v PX 1500
+        after 300
+        assert_equal 1 [r exhset other f v]
+        after 1500
+        assert_equal 1 [r exhset other f2 v]
+        assert_equal {} [r exhget k3 g]
+        assert_equal 0 [r exists k3]
+        r del other
+    }
+}
+

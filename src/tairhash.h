@@ -116,3 +116,16 @@ int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModu
 void notifyFieldSpaceEvent(char *event, RedisModuleString *key, RedisModuleString *field, int dbid);
 int isExpire(long long when);
 int fieldExpireIfNeeded(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, int is_timer);
+
+#if defined(SORT_MODE) || defined(SLAB_MODE)
+/* An entry taken out of a db expire index: the key name it held and its score. */
+typedef struct expiringKey {
+    RedisModuleString *key;
+    long long score;
+} expiringKey;
+
+int tairHashMinExpire(const tairHashObj *o, long long *min_expire);
+list *popDueExpireIndexEntries(int dbid, long long now, long limit);
+tairHashObj *openIndexedTairHash(RedisModuleCtx *ctx, const expiringKey *ek, int mode, RedisModuleKey **key);
+void releaseExpiringKey(list *keys, m_listNode *node);
+#endif

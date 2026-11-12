@@ -324,6 +324,72 @@ int fieldExpireIfNeeded(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, t
 }
 
 #if defined(SORT_MODE) || defined(SLAB_MODE)
+/* Whether o has a field with a TTL, and with it an entry in the db expire index. If it has,
+ * *min_expire is set to the earliest field expire, which is the score of that entry. */
+int tairHashMinExpire(const tairHashObj *o, long long *min_expire) {
+    if (TAIRHASH_EXPIRE_INDEX_LEN(o) == 0) {
+        return 0;
+    }
+#ifdef SLAB_MODE
+    *min_expire = o->expire_index->header->level[0].forward->expire_min;
+#else
+    *min_expire = o->expire_index->header->level[0].forward->score;
+#endif
+    return 1;
+}
+
+/* Takes up to `limit` entries due at `now` out of the db expire index, in expire order. The
+ * returned list owns their key names. */
+list *popDueExpireIndexEntries(int dbid, long long now, long limit) {
+    list *keys = m_listCreate();
+    m_zskiplistNode *ln = g_expire_index[dbid]->header->level[0].forward;
+    unsigned int taken = 0;
+    while (ln && limit-- > 0 && ln->score <= now) {
+        expiringKey *ek = RedisModule_Alloc(sizeof(*ek));
+        ek->key = ln->member;
+        ek->score = ln->score;
+        ln->member = NULL;
+        m_listAddNodeTail(keys, ek);
+        taken++;
+        ln = ln->level[0].forward;
+    }
+    if (taken) {
+        m_zslDeleteRangeByRank(g_expire_index[dbid], 1, taken);
+    }
+    return keys;
+}
+
+/* Opens the key of an entry taken out of the db expire index and returns its TairHash if the
+ * entry still indexes it, that is the key holds a TairHash whose earliest field expire is the
+ * entry's score. Otherwise the entry is stale and NULL is returned: opening the key for writing
+ * expired it, or the server freed the key without unlinking it (a key already expired when an
+ * RDB is loaded) and the name now holds nothing, another type or a later TairHash that has an
+ * entry of its own. */
+tairHashObj *openIndexedTairHash(RedisModuleCtx *ctx, const expiringKey *ek, int mode, RedisModuleKey **key) {
+    *key = RedisModule_OpenKey(ctx, ek->key, mode);
+    if (RedisModule_KeyType(*key) == REDISMODULE_KEYTYPE_MODULE && RedisModule_ModuleTypeGetType(*key) == TairHashType) {
+        tairHashObj *o = RedisModule_ModuleTypeGetValue(*key);
+        long long min_expire;
+        if (tairHashMinExpire(o, &min_expire) && min_expire == ek->score) {
+            return o;
+        }
+    }
+    RedisModule_CloseKey(*key);
+    *key = NULL;
+    return NULL;
+}
+
+/* Removes an entry from the list, freeing its key name unless it was handed back to the index
+ * (ek->key set to NULL). */
+void releaseExpiringKey(list *keys, m_listNode *node) {
+    expiringKey *ek = listNodeValue(node);
+    if (ek->key) {
+        RedisModule_FreeString(NULL, ek->key);
+    }
+    RedisModule_Free(ek);
+    m_listDelNode(keys, node);
+}
+
 void swapDbCallback(RedisModuleCtx *ctx, RedisModuleEvent e, uint64_t sub, void *data) {
     REDISMODULE_NOT_USED(e);
     REDISMODULE_NOT_USED(sub);
@@ -424,14 +490,9 @@ static int keySpaceNotification(RedisModuleCtx *ctx, int type, const char *event
         /* Keys of every type are renamed and moved. Only a tairhash tracks its own name,
          * and only one with expiring fields has an entry in the db expire index. */
         if (tair_hash_obj) {
-            int indexed = TAIRHASH_EXPIRE_INDEX_LEN(tair_hash_obj) > 0;
             long long previous_index = 0;
+            int indexed = tairHashMinExpire(tair_hash_obj, &previous_index);
             if (indexed) {
-#ifdef SLAB_MODE
-                previous_index = tair_hash_obj->expire_index->header->level[0].forward->expire_min;
-#else
-                previous_index = tair_hash_obj->expire_index->header->level[0].forward->score;
-#endif
                 m_zslDelete(g_expire_index[local_from_dbid], previous_index, local_from_key, NULL);
             }
             if (tair_hash_obj->key) {
@@ -2922,13 +2983,10 @@ void TairHashTypeUnlink2(RedisModuleKeyOptCtx *ctx, const void *value) {
 
     int dbid = RedisModule_GetDbIdFromOptCtx(ctx);
 
-    if (TAIRHASH_EXPIRE_INDEX_LEN(o)) {
+    long long min_expire;
+    if (tairHashMinExpire(o, &min_expire)) {
         /* UNLINK is a synchronous call, so ExpireNode can be safely deleted here. */
-#ifdef SLAB_MODE
-        m_zslDelete(g_expire_index[dbid], o->expire_index->header->level[0].forward->expire_min, o->key, NULL);
-#else
-        m_zslDelete(g_expire_index[dbid], o->expire_index->header->level[0].forward->score, o->key, NULL);
-#endif
+        m_zslDelete(g_expire_index[dbid], min_expire, o->key, NULL);
     }
 }
 

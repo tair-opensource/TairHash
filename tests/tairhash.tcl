@@ -2690,6 +2690,53 @@ start_server {tags {"tairhash failed-writes"}} {
         r del nk
     }
 
+    test {Expire times that do not fit are rejected} {
+        r del ok
+        catch {r exhset ok f v EX 9223372036854775} err
+        assert_match {*invalid expire*} $err
+        catch {r exhset ok f v PX 9223372036854775807} err
+        assert_match {*invalid expire*} $err
+        catch {r exhset ok f v EXAT 9223372036854775807} err
+        assert_match {*invalid expire*} $err
+        assert_equal 0 [r exists ok]
+
+        r exhset ok f v
+        catch {r exhexpire ok f 9223372036854775} err
+        assert_match {*invalid expire*} $err
+        catch {r exhpexpire ok f 9223372036854775807} err
+        assert_match {*invalid expire*} $err
+        catch {r exhincrby ok n 1 EX 9223372036854775} err
+        assert_match {*invalid expire*} $err
+        catch {r exhmsetwithopts ok a 1 0 9223372036854775 b 2 0 100} err
+        assert_match {*invalid expire*} $err
+        assert_equal -1 [r exhttl ok f]
+        assert_equal {f} [r exhkeys ok]
+        r del ok
+    }
+
+    test {Writes that would take a version past its maximum are rejected} {
+        r del ok
+        r exhset ok f 1 ABS 9223372036854775807
+        catch {r exhset ok f 2} err
+        assert_match {*version would overflow*} $err
+        catch {r exhincrby ok f 1} err
+        assert_match {*version would overflow*} $err
+        catch {r exhincrbyfloat ok f 1} err
+        assert_match {*version would overflow*} $err
+        catch {r exhexpire ok f 100} err
+        assert_match {*version would overflow*} $err
+        catch {r exhmset ok f 3 g 4} err
+        assert_match {*version would overflow*} $err
+        catch {r exhmsetwithopts ok f 3 0 100} err
+        assert_match {*version would overflow*} $err
+        assert_equal {1 9223372036854775807} [r exhgetwithver ok f]
+        assert_equal -1 [r exhttl ok f]
+        # A write that sets the version explicitly still applies.
+        assert_equal 0 [r exhset ok f 5 ABS 7]
+        assert_equal {5 7} [r exhgetwithver ok f]
+        r del ok
+    }
+
     test {EXHDELWITHVER validates every version before deleting} {
         r del nk
         r exhset nk f v

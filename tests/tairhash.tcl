@@ -2641,3 +2641,63 @@ start_server {tags {"tairhash watch"}} {
     }
 }
 
+start_server {tags {"tairhash failed-writes"}} {
+    r module load $testmodule
+
+    test {A write that fails creates no hash} {
+        r del nk
+        catch {r exhincrby nk f 5 MAX 3} err
+        assert_match {*overflow*} $err
+        catch {r exhincrbyfloat nk f 5 MAX 3} err
+        assert_match {*overflow*} $err
+        catch {r exhmsetwithopts nk f v 0 notanumber} err
+        assert_match {*syntax*} $err
+        catch {r exhmset nk} err
+        assert_match {*wrong number of arguments*} $err
+        catch {r exhmsetwithopts nk} err
+        assert_match {*wrong number of arguments*} $err
+        assert_equal 0 [r exists nk]
+    }
+
+    test {A write that fails after expiring the last field deletes the hash} {
+        r del nk
+        r exhset nk f 1 PX 50
+        after 100
+        catch {r exhincrby nk f 5 MAX 3} err
+        assert_equal 0 [r exists nk]
+
+        r exhset nk f 1 PX 50
+        after 100
+        catch {r exhincrbyfloat nk f 5 MAX 3} err
+        assert_equal 0 [r exists nk]
+
+        r exhset nk f v PX 50
+        after 100
+        assert_equal -1 [r exhset nk f v XX]
+        assert_equal 0 [r exists nk]
+
+        r exhset nk f v PX 50
+        after 100
+        assert_equal 0 [r exhpersist nk f]
+        assert_equal 0 [r exists nk]
+
+        r exhset nk f v PX 50
+        r exhset nk g v
+        after 100
+        catch {r exhmsetwithopts nk f v 0 0 g v 9 0} err
+        assert_match {*version*} $err
+        assert_equal {g} [r exhkeys nk]
+        r del nk
+    }
+
+    test {EXHDELWITHVER validates every version before deleting} {
+        r del nk
+        r exhset nk f v
+        r exhset nk g v
+        catch {r exhdelwithver nk f 1 g notanumber} err
+        assert_match {*syntax*} $err
+        assert_equal 2 [r exhlen nk]
+        r del nk
+    }
+}
+

@@ -2918,3 +2918,23 @@ start_server {tags {"tairhash passive-expire-handles"}} {
     }
 }
 
+start_server {tags {"tairhash watch-active-expire"}} {
+    r module load $testmodule
+
+    test {Active expire leaves a watched key with nothing to expire alone} {
+        r del wk probe
+        r exhset wk f v EX 1000
+        r watch wk
+        # Once active expire has removed the probe, it has also been over wk.
+        r exhset probe f v PX 1
+        wait_for_condition 100 50 {
+            [r exists probe] == 0
+        } else {
+            fail "active expire did not run"
+        }
+        r multi
+        r ping
+        assert_equal PONG [r exec]
+    }
+}
+

@@ -99,7 +99,10 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
 
                     if (RedisModule_ModuleTypeGetType(real_key) == TairHashType) {
                         tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
-                        if (TAIRHASH_EXPIRE_INDEX_LEN(tair_hash_obj) > 0) {
+                        /* Only a key with a field to expire now goes on to be opened for writing:
+                         * closing such a handle tells WATCH and client-side caches the key changed. */
+                        if (TAIRHASH_EXPIRE_INDEX_LEN(tair_hash_obj) > 0 &&
+                            tair_hash_obj->expire_index->header->level[0].forward->score <= start) {
                             m_listAddNodeTail(keys, key);
                         }
                     }

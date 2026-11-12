@@ -143,7 +143,10 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
         Module_Assert(zsl_len > 0);
 
         ln2 = tair_hash_obj->expire_index->header->level[0].forward;
-        start_index = 0, delete_rank = 0;
+        /* The split counts describe this key's first unfinished slab. When the per-loop budget is
+         * already spent the loop below does not run, and counts left from the previous key would
+         * compact this key's slab with that key's indices. */
+        start_index = 0, delete_rank = 0, ontime_num = 0, timeout_num = 0;
         long long start_active_expire_timer = RedisModule_Milliseconds();
         while (ln2 && expire_keys_per_loop > 0) {
             if (ln2->level[0].forward != NULL && isExpire(ln2->level[0].forward->expire_min)) {

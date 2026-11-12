@@ -2391,3 +2391,38 @@ start_server {tags {"slab_bug_reproduce"}} {
         }
     }
 }
+
+start_server {tags {"tairhash active-expire-budget"}} {
+    # A small per-loop budget makes one active expire cycle stop partway through its keys.
+    r module load $testmodule active_expire_keys_per_loop 10
+
+    test {Active expire leaves keys after the spent budget intact} {
+        # Each key expires part of its fields, so the first key ends the cycle on a partially
+        # expired slab and spends the budget; the cycle must not touch the keys after it.
+        for {set k 0} {$k < 8} {incr k} {
+            r del budget$k
+            for {set i 0} {$i < 10} {incr i} {
+                r exhset budget$k short$i v PX 150
+            }
+            r exhset budget$k keep1 v EX 1000
+            r exhset budget$k keep2 v EX 1000
+        }
+
+        # EXHLEN neither triggers nor filters expiration, so only active expire can bring it to 2.
+        for {set k 0} {$k < 8} {incr k} {
+            wait_for_condition 100 100 {
+                [r exhlen budget$k] == 2
+            } else {
+                fail "budget$k has [r exhlen budget$k] fields, expected 2"
+            }
+        }
+        for {set k 0} {$k < 8} {incr k} {
+            assert_equal v [r exhget budget$k keep1]
+            assert_equal 1 [r exhdel budget$k keep1]
+            assert {[r exhttl budget$k keep2] > 900}
+            assert_equal 1 [r exhdel budget$k keep2]
+            assert_equal 0 [r exists budget$k]
+        }
+        assert_equal PONG [r ping]
+    }
+}

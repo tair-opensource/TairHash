@@ -65,8 +65,9 @@ case "$SERVER" in
 esac
 SERVER_REPO="${SERVER_REPO:-$DEFAULT_REPO}"
 
+# Name scan explicitly: it is the default only before 2.0, whose CMake ignores TAIRHASH_EXPIRE_MODE.
 case "$MODE" in
-    scan) MODE_FLAGS=() ;;
+    scan) MODE_FLAGS=(-DTAIRHASH_EXPIRE_MODE=scan) ;;
     sort) MODE_FLAGS=(-DSORT_MODE=ON) ;;
     slab) MODE_FLAGS=(-DSLAB_MODE=ON) ;;
     *) echo "unknown mode: $MODE" >&2; exit 2 ;;

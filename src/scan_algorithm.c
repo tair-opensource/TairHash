@@ -25,7 +25,8 @@ void insert(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
     REDISMODULE_NOT_USED(dbid);
     REDISMODULE_NOT_USED(key);
     if (expire) {
-        m_zslInsert(obj->expire_index, expire, takeAndRef(field));
+        tairHashEnsureExpireIndex(obj);
+        m_zslInsert(obj->expire_index, expire, ownString(field));
     }
 }
 
@@ -49,7 +50,6 @@ void delete(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
 
 void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
     tairHashObj *tair_hash_obj = NULL;
-    int start_index;
     m_zskiplistNode *ln = NULL;
     m_zskiplistNode *ln2 = NULL;
 
@@ -65,7 +65,10 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
     list *keys = m_listCreate();
     /* Each db has its own cursor, but this value may be wrong when swapdb appears (because we do not have a callback notification),
      * But this will not cause serious problems. */
-    static long long scan_cursor[DB_NUM] = {0};
+    static long long *scan_cursor = NULL;
+    if (scan_cursor == NULL) {
+        scan_cursor = RedisModule_Calloc(g_expire_algorithm.db_num, sizeof(*scan_cursor));
+    }
     RedisModuleCallReply *reply = RedisModule_Call(ctx, "SCAN", "lcl", scan_cursor[dbid], "COUNT", g_expire_algorithm.keys_per_active_loop);
     if (reply != NULL) {
         switch (RedisModule_CallReplyType(reply)) {
@@ -95,7 +98,10 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
 
                     if (RedisModule_ModuleTypeGetType(real_key) == TairHashType) {
                         tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
-                        if (tair_hash_obj->expire_index->length > 0) {
+                        /* Only a key with a field to expire now goes on to be opened for writing:
+                         * closing such a handle tells WATCH and client-side caches the key changed. */
+                        if (TAIRHASH_EXPIRE_INDEX_LEN(tair_hash_obj) > 0 &&
+                            tair_hash_obj->expire_index->header->level[0].forward->score <= start) {
                             m_listAddNodeTail(keys, key);
                         }
                     }
@@ -137,21 +143,22 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
         }
 
         tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
-        if (dictSize(tair_hash_obj->hash) == 1) {
-            may_delkey = 1;
-        }
         RedisModule_CloseKey(real_key);
 
         zsl_len = tair_hash_obj->expire_index->length;
         Module_Assert(zsl_len > 0);
 
         ln2 = tair_hash_obj->expire_index->header->level[0].forward;
-        start_index = 0;
         while (ln2 && expire_keys_per_loop) {
+            /* EXHDELREPL, which expires the field, takes its entry out of the index, and with the
+             * last field of the hash it deletes the key: the hash may be gone when it returns. */
+            m_zskiplistNode *next = ln2->level[0].forward;
+            if (dictSize(tair_hash_obj->hash) == 1) {
+                may_delkey = 1;
+            }
             field = ln2->member;
             if (fieldExpireIfNeeded(ctx, dbid, key, tair_hash_obj, field, 1)) {
                 g_expire_algorithm.stat_active_expired_field[dbid]++;
-                start_index++;
                 expire_keys_per_loop--;
                 if (may_delkey) {
                     break;
@@ -159,24 +166,7 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
             } else {
                 break;
             }
-            ln2 = ln2->level[0].forward;
-        }
-
-        // If the key happens to expire, it will be released in fieldExpireIfNeeded.
-        if (may_delkey) {
-            real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_OPEN_KEY_NOTOUCH);
-            int type = RedisModule_KeyType(real_key);
-            if (type == REDISMODULE_KEYTYPE_EMPTY) {
-                m_listDelNode(keys, node);
-                RedisModule_CloseKey(real_key);
-                continue;
-            } 
-            RedisModule_CloseKey(real_key);
-        }
-
-        if (start_index) {
-            m_zslDeleteRangeByRank(tair_hash_obj->expire_index, 1, start_index);
-            delEmptyTairHashIfNeeded(ctx, NULL, key, tair_hash_obj);
+            ln2 = next;
         }
         m_listDelNode(keys, node);
     }
@@ -199,7 +189,7 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
     real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE);
     if (RedisModule_KeyType(real_key) != REDISMODULE_KEYTYPE_EMPTY && RedisModule_ModuleTypeGetType(real_key) == TairHashType) {
         tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
-        if (tair_hash_obj->expire_index->length > 0) {
+        if (TAIRHASH_EXPIRE_INDEX_LEN(tair_hash_obj) > 0) {
             m_listAddNodeTail(keys, key);
         }
     }
@@ -274,7 +264,7 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
     m_listRelease(keys);
 }
 
-void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long expire, int is_timer) {
+int deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long expire, int is_timer) {
     if (is_timer) {
         /* See bugfix: https://github.com/redis/redis/pull/8617
                        https://github.com/redis/redis/pull/8097
@@ -282,21 +272,32 @@ void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, t
         */
         RedisModuleCtx *ctx2 = RedisModule_GetThreadSafeContext(NULL);
         RedisModule_SelectDb(ctx2, dbid);
-        notifyFieldSpaceEvent("expired", key, field, dbid);
+        /* field is the expire index's copy of the name, which the call frees with the index entry. */
+        RedisModuleString *field_dup = RedisModule_CreateStringFromString(NULL, field);
+        /* The server can refuse the call, as a cluster node does while the cluster is down or when
+         * it does not serve the key's slot. The field is then still in the hash. */
         RedisModuleCallReply *reply = RedisModule_Call(ctx2, "EXHDELREPL", "ss!", key, field);
+        int deleted = reply != NULL && RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_INTEGER && RedisModule_CallReplyInteger(reply) == 1;
         if (reply != NULL) {
             RedisModule_FreeCallReply(reply);
         }
+        if (deleted) {
+            notifyFieldSpaceEvent("expired", key, field_dup, dbid);
+        }
+        RedisModule_FreeString(NULL, field_dup);
         RedisModule_FreeThreadSafeContext(ctx2);
+        return deleted;
     } else {
         RedisModuleString *key_dup = RedisModule_CreateStringFromString(NULL, key);
+        /* field may be the expire index's own copy of the name, which deleting the index entry frees. */
         RedisModuleString *field_dup = RedisModule_CreateStringFromString(NULL, field);
         m_zslDelete(obj->expire_index, expire, field_dup, NULL);
-        m_dictDelete(obj->hash, field);
+        m_dictDelete(obj->hash, field_dup);
         RedisModule_Replicate(ctx, "EXHDEL", "ss", key_dup, field_dup);
         notifyFieldSpaceEvent("expired", key_dup, field_dup, dbid);
         RedisModule_FreeString(NULL, key_dup);
         RedisModule_FreeString(NULL, field_dup);
+        return 1;
     }
 }
 

@@ -33,6 +33,8 @@
 #define TAIRHASH_ERRORMSG_INT_MIN_MAX "ERR min or max is specified, but value is not an integer"
 #define TAIRHASH_ERRORMSG_FLOAT_MIN_MAX "ERR min or max is specified, but value is not a float"
 #define TAIRHASH_ERRORMSG_MIN_MAX "ERR min value is bigger than max value"
+#define TAIRHASH_ERRORMSG_INVALID_EXPIRE "ERR invalid expire time"
+#define TAIRHASH_ERRORMSG_VERSION_OVERFLOW "ERR version would overflow"
 
 #define TAIR_HASH_SET_NO_FLAGS 0
 #define TAIR_HASH_SET_NX (1 << 0)
@@ -48,7 +50,6 @@
 
 #define UNIT_SECONDS 0
 #define UNIT_MILLISECONDS 1
-#define DB_NUM 16 /* This value must be equal to the db_dum of redis. */
 
 #define TAIR_HASH_ACTIVE_EXPIRE_PERIOD 1000
 #define TAIR_HASH_ACTIVE_EXPIRE_KEYS_PER_LOOP 1000
@@ -71,6 +72,11 @@ typedef struct TairHashVal {
     RedisModuleString *value;
 } TairHashVal;
 
+/*
+ * `expire_index` is allocated on the first field that gets a TTL, so a hash that never
+ * uses field expiration pays nothing for it. Use TAIRHASH_EXPIRE_INDEX_LEN to read its
+ * length.
+ */
 typedef struct tairHashObj {
     dict *hash;
 #if defined SLAB_MODE
@@ -81,11 +87,14 @@ typedef struct tairHashObj {
     RedisModuleString *key;
 } tairHashObj;
 
+#define TAIRHASH_EXPIRE_INDEX_LEN(o) ((o)->expire_index ? (o)->expire_index->length : 0)
+
 typedef struct ExpireAlgorithm {
     void (*insert)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long expire);
     void (*update)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long cur_expire, long long new_expire);
     void (*delete)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long expire);
-    void (*deleteAndPropagate)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long expire, int is_timer);
+    /* Returns whether the field was deleted: the server can refuse a delete that goes through a command. */
+    int (*deleteAndPropagate)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long expire, int is_timer);
     void (*activeExpire)(RedisModuleCtx *ctx, int dbid, uint64_t keys);
     void (*passiveExpire)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key_per_loop);
 
@@ -94,16 +103,37 @@ typedef struct ExpireAlgorithm {
     uint64_t dbs_per_active_loop;
     uint64_t keys_per_active_loop;
     uint64_t keys_per_passive_loop;
-    uint64_t stat_active_expired_field[DB_NUM];
-    uint64_t stat_passive_expired_field[DB_NUM];
+    int db_num; /* databases of the server, counted at load; the arrays below have one entry per db */
+    uint64_t *stat_active_expired_field;
+    uint64_t *stat_passive_expired_field;
     uint64_t stat_last_active_expire_time_msec;
     uint64_t stat_avg_active_expire_time_msec;
     uint64_t stat_max_active_expire_time_msec;
 } ExpireAlgorithm;
 
 void _moduleAssert(const char *estr, const char *file, int line);
-RedisModuleString *takeAndRef(RedisModuleString *str);
+RedisModuleString *ownString(RedisModuleString *str);
+RedisModuleString *expireIndexMember(const tairHashObj *obj);
+void tairHashEnsureExpireIndex(tairHashObj *o);
 int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *raw_key, tairHashObj *obj);
 void notifyFieldSpaceEvent(char *event, RedisModuleString *key, RedisModuleString *field, int dbid);
 int isExpire(long long when);
+int isReadOnlyStatus(RedisModuleCtx *ctx);
 int fieldExpireIfNeeded(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, int is_timer);
+
+#if defined(SORT_MODE) || defined(SLAB_MODE)
+/* One per database, NULL until the db gets an expiring field; use dbExpireIndex. */
+extern m_zskiplist **g_expire_index;
+m_zskiplist *dbExpireIndex(int dbid);
+
+/* An entry taken out of a db expire index: the key name it held and its score. */
+typedef struct expiringKey {
+    RedisModuleString *key;
+    long long score;
+} expiringKey;
+
+int tairHashMinExpire(const tairHashObj *o, long long *min_expire);
+list *popDueExpireIndexEntries(int dbid, long long now, long limit);
+tairHashObj *openIndexedTairHash(RedisModuleCtx *ctx, const expiringKey *ek, int mode, RedisModuleKey **key);
+void releaseExpiringKey(list *keys, m_listNode *node);
+#endif

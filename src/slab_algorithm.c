@@ -17,7 +17,6 @@
 
 #if defined(SLAB_MODE)
 extern ExpireAlgorithm g_expire_algorithm;
-extern m_zskiplist *g_expire_index[DB_NUM];
 extern RedisModuleType *TairHashType;
 
 int ontime_indices[SLABMAXN], timeout_indices[SLABMAXN];
@@ -27,15 +26,16 @@ void insert(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
     REDISMODULE_NOT_USED(key);
     if (expire) {
         long long before_min_score = -1, after_min_score = -1;
+        tairHashEnsureExpireIndex(o);
         if (o->expire_index->header->level[0].forward) {
             before_min_score = o->expire_index->header->level[0].forward->expire_min;
         }
-        slab_expireInsert(o->expire_index, takeAndRef(field), expire);
+        slab_expireInsert(o->expire_index, ownString(field), expire);
         after_min_score = o->expire_index->header->level[0].forward->expire_min;
         if (before_min_score > 0) {
-            m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score);
+            m_zslUpdateScore(dbExpireIndex(dbid), before_min_score, o->key, after_min_score);
         } else {
-            m_zslInsert(g_expire_index[dbid], after_min_score, takeAndRef(o->key));
+            m_zslInsert(dbExpireIndex(dbid), after_min_score, expireIndexMember(o));
         }
     }
 }
@@ -48,10 +48,10 @@ void update(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
         tairhash_zskiplistNode *ln = o->expire_index->header->level[0].forward;
         Module_Assert(ln != NULL);
         before_min_score = ln->expire_min;
-        RedisModuleString *new_field = takeAndRef(field);
+        RedisModuleString *new_field = ownString(field);
         slab_expireUpdate(o->expire_index, field, cur_expire, new_field, new_expire);
         after_min_score = o->expire_index->header->level[0].forward->expire_min;
-        m_zslUpdateScore(g_expire_index[dbid], before_min_score, o->key, after_min_score);
+        m_zslUpdateScore(dbExpireIndex(dbid), before_min_score, o->key, after_min_score);
     }
 }
 
@@ -66,9 +66,9 @@ void delete(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
         slab_expireDelete(o->expire_index, field, cur_expire);
         if (o->expire_index->header->level[0].forward) {
             long long after_min_score = o->expire_index->header->level[0].forward->expire_min;
-            m_zslUpdateScore(g_expire_index[dbid], before_min_score, key, after_min_score);
+            m_zslUpdateScore(dbExpireIndex(dbid), before_min_score, key, after_min_score);
         } else {
-            m_zslDelete(g_expire_index[dbid], before_min_score, key, NULL);
+            m_zslDelete(dbExpireIndex(dbid), before_min_score, key, NULL);
         }
     }
 }
@@ -76,70 +76,30 @@ void delete(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
 void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
     tairHashObj *tair_hash_obj = NULL;
     int start_index;
-    m_zskiplistNode *ln = NULL;
     tairhash_zskiplistNode *ln2 = NULL;
-    RedisModuleString *key, *field;
+    RedisModuleString *key;
     RedisModuleKey *real_key;
 
-    long long when, now;
-    unsigned long zsl_len;
-
     int expire_keys_per_loop = keys_per_loop;
-    list *keys = m_listCreate();
+    list *keys = popDueExpireIndexEntries(dbid, RedisModule_Milliseconds(), keys_per_loop);
 
-    /* 1. The current db does not have a key that needs to expire. */
-    zsl_len = g_expire_index[dbid]->length;
-    if (zsl_len == 0) {
-        m_listRelease(keys);
-        return;
-    }
-
-    /* 2. Enumerates expired keys. */
-    ln = g_expire_index[dbid]->header->level[0].forward;
-    start_index = 0;
-    while (ln && expire_keys_per_loop--) {
-        key = ln->member;
-        when = ln->score;
-        now = RedisModule_Milliseconds();
-        if (when > now) {
-            break;
-        }
-        start_index++;
-        m_listAddNodeTail(keys, key);
-        ln = ln->level[0].forward;
-    }
-
-    if (start_index) {
-        /* It is assumed that these keys will all be deleted. */
-        m_zslDeleteRangeByRank(g_expire_index[dbid], 1, start_index);
-    }
-
-    if (listLength(keys) == 0) {
-        m_listRelease(keys);
-        return;
-    }
-
-    /* SLAB_MODE:3. Delete expired field. */
-    expire_keys_per_loop = keys_per_loop;
+    /* Delete expired fields. */
     m_listNode *node;
     int ontime_num = 0, timeout_num = 0, timeout_index = 0, delete_rank = 0, j;
     while ((node = listFirst(keys)) != NULL) {
-        key = listNodeValue(node);
-        real_key = RedisModule_OpenKey(ctx, key, REDISMODULE_READ | REDISMODULE_WRITE | REDISMODULE_OPEN_KEY_NOTOUCH);
-        int type = RedisModule_KeyType(real_key);
-        if (type != REDISMODULE_KEYTYPE_EMPTY) {
-            Module_Assert(RedisModule_ModuleTypeGetType(real_key) == TairHashType);
-        } else {
-            m_listDelNode(keys, node);
+        expiringKey *ek = listNodeValue(node);
+        tair_hash_obj = openIndexedTairHash(ctx, ek, REDISMODULE_READ | REDISMODULE_WRITE | REDISMODULE_OPEN_KEY_NOTOUCH, &real_key);
+        if (tair_hash_obj == NULL) {
+            releaseExpiringKey(keys, node);
             continue;
         }
-        tair_hash_obj = RedisModule_ModuleTypeGetValue(real_key);
-
-        zsl_len = tair_hash_obj->expire_index->length;
-        Module_Assert(zsl_len > 0);
+        key = ek->key;
 
         ln2 = tair_hash_obj->expire_index->header->level[0].forward;
-        start_index = 0, delete_rank = 0;
+        /* The split counts describe this key's first unfinished slab. When the per-loop budget is
+         * already spent the loop below does not run, and counts left from the previous key would
+         * compact this key's slab with that key's indices. */
+        start_index = 0, delete_rank = 0, ontime_num = 0, timeout_num = 0;
         long long start_active_expire_timer = RedisModule_Milliseconds();
         while (ln2 && expire_keys_per_loop > 0) {
             if (ln2->level[0].forward != NULL && isExpire(ln2->level[0].forward->expire_min)) {
@@ -152,16 +112,35 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
                     break;
             }
 
+            int kept = 0;
             for (j = 0; j < timeout_num; j++) {
                 if (ontime_num == 0) {
                     timeout_index = j;
                 } else {
                     timeout_index = timeout_indices[j];
                 }
-                fieldExpireIfNeeded(ctx, dbid, key, tair_hash_obj, ln2->slab->keys[timeout_index], 1);
-                g_expire_algorithm.stat_active_expired_field[dbid]++;
-                start_index++;
-                expire_keys_per_loop--;
+                if (fieldExpireIfNeeded(ctx, dbid, key, tair_hash_obj, ln2->slab->keys[timeout_index], 1)) {
+                    g_expire_algorithm.stat_active_expired_field[dbid]++;
+                    start_index++;
+                    expire_keys_per_loop--;
+                } else {
+                    /* Still in the hash, so it stays in the slab. timeout_indices is read from j on,
+                     * which leaves its start free to collect these. */
+                    timeout_indices[kept++] = timeout_index;
+                }
+            }
+            if (kept) {
+                /* Merge them, from the back, into the ascending indices the slab keeps. */
+                int from = ontime_num - 1, to = ontime_num + kept - 1;
+                for (j = kept - 1; j >= 0; to--) {
+                    if (from >= 0 && ontime_indices[from] > timeout_indices[j]) {
+                        ontime_indices[to] = ontime_indices[from--];
+                    } else {
+                        ontime_indices[to] = timeout_indices[j--];
+                    }
+                }
+                ontime_num += kept;
+                timeout_num -= kept;
             }
 
             if (ontime_num == 0) {
@@ -179,15 +158,19 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
             slab_deleteSlabExpire(tair_hash_obj->expire_index, tair_hash_obj->expire_index->header->level[0].forward, ontime_indices, ontime_num);
         }
 
-        if (tair_hash_obj->expire_index->length > 0 && start_index) {
-            m_zslInsert(g_expire_index[dbid], tair_hash_obj->expire_index->header->level[0].forward->expire_min, takeAndRef(tair_hash_obj->key));
-        }
-        if (start_index) {
-            delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj);
-        }
+        int deleted = start_index ? delEmptyTairHashIfNeeded(ctx, real_key, key, tair_hash_obj) : 0;
 
-        m_listDelNode(keys, node);
-        start_index = 0;
+        /* The key left the global index above; hand its name back whenever fields remain to expire,
+         * including when the per-loop budget ran out before any of them were processed. */
+        if (!deleted && tair_hash_obj->expire_index->length > 0) {
+            m_zslInsert(dbExpireIndex(dbid), tair_hash_obj->expire_index->header->level[0].forward->expire_min, key);
+            ek->key = NULL;
+        }
+        /* Deleting the key closed it. Left open, it would outlive a later delete of the same key. */
+        if (!deleted) {
+            RedisModule_CloseKey(real_key);
+        }
+        releaseExpiringKey(keys, node);
     }
     m_listRelease(keys);
 }
@@ -199,24 +182,26 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
     /* Not support. */
 }
 
-void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, long long expire, int is_timer) {
+int deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, long long expire, int is_timer) {
     RedisModuleString *key_dup = RedisModule_CreateStringFromString(NULL, key);
+    /* field may be the expire index's own copy of the name, which deleting the index entry frees. */
     RedisModuleString *field_dup = RedisModule_CreateStringFromString(NULL, field);
     if (!is_timer) {
         long long before_min_score = o->expire_index->header->level[0].forward->expire_min;
         slab_expireDelete(o->expire_index, field_dup, expire);
         if (o->expire_index->header->level[0].forward != NULL) {
             long long after_min_score = o->expire_index->header->level[0].forward->expire_min;
-            m_zslUpdateScore(g_expire_index[dbid], before_min_score, key, after_min_score);
+            m_zslUpdateScore(dbExpireIndex(dbid), before_min_score, key, after_min_score);
         } else {
-            m_zslDelete(g_expire_index[dbid], before_min_score, key, NULL);
+            m_zslDelete(dbExpireIndex(dbid), before_min_score, key, NULL);
         }
     }
-    m_dictDelete(o->hash, field);
+    m_dictDelete(o->hash, field_dup);
     RedisModule_Replicate(ctx, "EXHDEL", "ss", key_dup, field_dup);
     notifyFieldSpaceEvent("expired", key_dup, field_dup, dbid);
     RedisModule_FreeString(NULL, key_dup);
     RedisModule_FreeString(NULL, field_dup);
+    return 1;
 }
 
 #endif

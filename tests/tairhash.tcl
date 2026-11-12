@@ -2517,8 +2517,9 @@ start_server {tags {"tairhash passive-expire"}} {
         test {A stored expire of -1 does not stand for a hash without expiring fields} {
             r del plain rk probe
             r exhset plain f v
-            # rk has a field whose expire is -1. Renaming over rk must take its expire index entry
-            # with it, or active expire finds that entry naming a hash that has no index at all.
+            # rk has a field with a stored expire of -1, which loads as an expired field. Renaming
+            # over rk must take its expire index entry with it, or active expire finds that entry
+            # naming a hash that has no index at all.
             set payload [tairhash_payload 0000000000000001 ffffffffffffffff]
             r multi
             r restore rk 0 $payload
@@ -2533,6 +2534,28 @@ start_server {tags {"tairhash passive-expire"}} {
             assert_equal v [r exhget rk f]
             r del rk
         }
+    }
+
+    test {A negative expire or version from an earlier release loads} {
+        r select 12
+        r flushdb
+        # A release that does not check a TTL for overflow stores the sum of an overflowing
+        # EXHMSETWITHOPTS TTL and the time as it comes out, which is negative. The field loads as
+        # one that has expired.
+        r restore rk 0 [tairhash_payload 0000000000000001 800001a2c7f1a2b4]
+        assert_equal 1 [r exhlen rk]
+        assert_equal 0 [r exhlen rk noexp]
+        r exhset rk g v EX 100
+        assert_equal {} [r exhget rk f]
+        assert_equal 1 [r exhexpire rk g 200]
+        assert_equal 1 [r exhdel rk g]
+        assert_equal 0 [r exists rk]
+        # Sort and slab mode list a database here while its expire index holds an entry.
+        assert {![string match {*db12:*} [r info tairhash_ActiveExpiredFields]]}
+        # Such a release wraps a version it increments past the maximum. It loads as stored.
+        r restore rk 0 [tairhash_payload 8000000000000000 0000000000000000]
+        assert_equal {v -9223372036854775808} [r exhgetwithver rk f]
+        r del rk
     }
 
     test {A stale expire index entry does not shadow a later TairHash of the same name} {

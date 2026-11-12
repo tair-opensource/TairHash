@@ -2928,6 +2928,11 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
         version = RedisModule_LoadUnsigned(rdb);
         expire = RedisModule_LoadUnsigned(rdb);
         value = RedisModule_LoadString(rdb);
+        /* Earlier releases could store a negative expire. It is a time long past, as is 1, which a
+         * TTL of 0 stores, and the expire indexes count on an expire being positive. */
+        if (expire < 0) {
+            expire = 1;
+        }
         TairHashVal *hashv = createTairHashVal();
         hashv->version = version;
         hashv->expire = expire;

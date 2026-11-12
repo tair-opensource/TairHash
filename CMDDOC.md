@@ -994,3 +994,33 @@ OK
 ```
 
 <br/>
+
+## Replication and persistence
+
+Write commands replicate the resulting state of each field they wrote rather than the
+request, so a replica or an AOF replay reproduces values, versions and TTLs exactly,
+independently of its own clock and state. The `replication_format` module option chooses
+the commands:
+
+- `state` (the default): one internal
+  `EXHMSETREPL key 1 field value version expire [field value version expire ...]` per write
+  command, with the expire as an absolute unix time in milliseconds, 0 for none. A write of
+  more than 8192 fields is split into several, propagated together in a MULTI/EXEC. A write
+  that leaves the values alone (the `EXHEXPIRE` family, `EXHPERSIST`, `EXHSETVER`) sends
+  `EXHMETAREPL key 1 field version expire [...]` instead, without the value. The `1` names
+  the argument layout; a node rejects a layout it does not know and logs the write it drops.
+  An `EXHMETAREPL` for a field the node does not have means that the node has diverged from
+  its master: it updates the fields it has, logs the others and replies an error.
+  AOF rewrite emits `EXHMSETREPL` with up to 64 fields each. Both commands are accepted only
+  from the replication stream or while loading; a regular client gets
+  `ERR only accepted from the replication stream or while loading` (a server that cannot
+  report which context flags it supports, because it lacks `RedisModule_GetContextFlagsAll`,
+  which Redis has from 6.0.9 on, always accepts them). So a state-format AOF or replication
+  stream can be applied only by loading it or by a replica, not replayed through a client
+  such as `redis-cli --pipe`; use `compat` where that is needed.
+- `compat`: one `EXHSET key field value ABS <version> [PXAT <expire>]` per field, or
+  `EXHSETNX key field value` for a field at version 0, which `EXHSET` cannot set (only data
+  written by TairHash 1.x has it). From the replication stream or the AOF, `EXHSETNX` leaves
+  the new field at version 0; sent by a client, it starts the field at version 1. The fields
+  of one write command are propagated together in a MULTI/EXEC. TairHash 1.x accepts these
+  commands, which is what an upgrade relies on; see the README.

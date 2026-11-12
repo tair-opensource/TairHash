@@ -2988,3 +2988,59 @@ start_server {tags {"tairhash exhdelrepl"}} {
     }
 }
 
+start_server {tags {"tairhash client-pause"} overrides {appendonly yes}} {
+    # With the AOF on, a paused server asserts that no command is propagated.
+    r module load $testmodule enable_active_expire 0
+
+    # CLIENT PAUSE WRITE and CLIENT UNPAUSE came with Redis 6.2.
+    set server_version [split [s redis_version] .]
+    if {[lindex $server_version 0] > 6 || ([lindex $server_version 0] == 6 && [lindex $server_version 1] >= 2)} {
+        test {A read does not delete an expired field while clients are paused} {
+            r del k
+            r exhset k f v PX 100
+            r exhset k g v
+            wait_for_condition 100 20 {
+                [r exhlen k noexp] == 1
+            } else {
+                fail "the field did not expire"
+            }
+            r client pause 100000 write
+            # The read does not see the field, which stays until the pause is over.
+            assert_equal {} [r exhget k f]
+            assert_equal 2 [r exhlen k]
+            r client unpause
+            assert_equal {} [r exhget k f]
+            assert_equal 1 [r exhlen k]
+            r del k
+        }
+
+        start_server {overrides {appendonly yes}} {
+            r module load $testmodule active_expire_period 50
+
+            test {Active expire does not run while clients are paused} {
+                r del k
+                r exhset k f v PX 1000
+                r exhset k g v
+                r client pause 100000 write
+                # The field has to expire during the pause.
+                assert_equal 2 [r exhlen k noexp]
+                wait_for_condition 200 20 {
+                    [r exhlen k noexp] == 1
+                } else {
+                    fail "the field did not expire"
+                }
+                # Several periods of the timer.
+                after 300
+                assert_equal 2 [r exhlen k]
+                r client unpause
+                wait_for_condition 100 50 {
+                    [r exhlen k] == 1
+                } else {
+                    fail "the field was not actively expired after the pause"
+                }
+                r del k
+            }
+        }
+    }
+}
+

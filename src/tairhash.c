@@ -258,6 +258,12 @@ int isReadOnlyStatus(RedisModuleCtx *ctx) {
         return 1;
     }
 
+    /* While clients are paused, as for a failover, the dataset has to stay as it is, and the
+     * server asserts that nothing is propagated. Servers before Redis 6.0 cannot tell. */
+    if (RedisModule_AvoidReplicaTraffic && RedisModule_AvoidReplicaTraffic()) {
+        return 1;
+    }
+
     return 0;
 }
 

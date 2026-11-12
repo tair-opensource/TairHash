@@ -91,6 +91,27 @@ typedef struct tairHashObj {
 
 #define TAIRHASH_EXPIRE_INDEX_LEN(o) ((o)->expire_index ? (o)->expire_index->length : 0)
 
+#if defined(SLAB_MODE)
+#define TAIRHASH_EXPIRE_MODE_NAME "slab"
+#elif defined(SORT_MODE)
+#define TAIRHASH_EXPIRE_MODE_NAME "sort"
+#else
+#define TAIRHASH_EXPIRE_MODE_NAME "scan"
+#endif
+
+/* Hashes, across all databases, with at least one field waiting to expire. */
+unsigned long long expiringKeyCount(void);
+
+#if defined(SORT_MODE) || defined(SLAB_MODE)
+/* UNLINK already took the key out of its db expire index. */
+static inline void expiringKeyReleased(const tairHashObj *o) {
+    (void)o;
+}
+#else
+/* Called as a hash is freed, possibly on a lazy-free thread. */
+void expiringKeyReleased(const tairHashObj *o);
+#endif
+
 typedef struct ExpireAlgorithm {
     void (*insert)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long expire);
     void (*update)(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long cur_expire, long long new_expire);

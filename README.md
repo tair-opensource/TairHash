@@ -40,6 +40,7 @@ skiplist node and a copy of the key name (about 130 bytes for a short name).
 - Do not sort TairHash globally (Smaller memory overhead)
 - Each TairHash will still use a sort index to sort the fields internally (For expiration efficiency)
 - The built-in timer will periodically use the SCAN command to find the TairHash that contains the expired field, and then check the sort index inside the TairHash to eliminate the field
+- A scan opens every key it visits, whatever its type, so the timer skips it while no TairHash has a field with a TTL
 - The sort index holds its own copy of the name of each field that has a TTL; a field without a TTL is not in it
 
 **Supported redis version**: redis >= 5.0
@@ -80,6 +81,23 @@ skiplist node and a copy of the key name (about 130 bytes for a short name).
 ## Passivity expiration  
 - Every time you read or write a field, it will also trigger the expiration of the field itself  
 - Every time you write a field, tairhash also checks whether other fields (may belong to other keys) are expired (currently up to 3 at a time), because fields are sorted by TTL, so this check will be very efficient (Note: SLAB_MODE does not support this feature)
+
+## Expiration statistics
+`EXHEXPIREINFO` reports how expiration is configured and what it has done:
+
+| Field | Meaning |
+|---|---|
+| `tair_hash_active_expire_mode` | Expire mode the module was built with: `scan`, `sort` or `slab` |
+| `tair_hash_expiring_keys` | TairHash keys, across all databases, with at least one field waiting to expire |
+| `enable_active_expire` | 1 when the active expire timer runs |
+| `tair_hash_active_expire_period` | Milliseconds between active expire passes |
+| `tair_hash_active_expire_keys_per_loop` | Keys a pass examines in each database (SCAN mode: the SCAN `COUNT`) |
+| `tair_hash_active_expire_dbs_per_loop` | Databases a pass visits |
+| `tair_hash_active_expire_last_time_msec` / `_max_time_msec` / `_avg_time_msec` | Duration of the last, longest and average pass |
+| `tair_hash_passive_expire_keys_per_loop` | Most fields a write expires along the way |
+| `db: <n>, active_expired_fields: <a>, passive_expired_fields: <p>` | Fields expired in each database |
+
+SORT and SLAB builds also report these in `INFO tairhash`.
 
 
 ## Event notification   

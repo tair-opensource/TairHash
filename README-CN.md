@@ -33,6 +33,7 @@
 - 不对TairHash进行全局排序（可以节省内存）
 - 每个TairHash内部依然会使用一个排序索引对fields进行排序（加速每个key内部的field查找）
 - 内置定时器会周期使用SCAN命令找到包含过期field的TairHash，然后检查TairHash内部的排序索引，进行field的淘汰
+- SCAN会打开访问到的每一个key（无论类型），因此当没有任何TairHash含有设置了过期时间的field时，定时器会跳过扫描
 - 排序索引为每个设置了过期时间的field保存一份field名的拷贝，没有设置过期时间的field不在索引中
 
 **支持的redis版本**: redis >= 5.0  
@@ -69,6 +70,23 @@
 ## 主动过期
 - 每一次读写field，会触发对这个field自身的过期淘汰操作  
 - 每次写一个field时，TairHash也会检查其它field（可能属于其它的key）是否已经过期（每次最多检查3个），因为field是按照TTL排序的，因此这个检查会很高效 (注意: SLAB_MODE暂时不支持这个功能)
+
+## 过期统计
+`EXHEXPIREINFO` 返回过期相关的配置和统计：
+
+| 字段 | 含义 |
+|---|---|
+| `tair_hash_active_expire_mode` | 模块编译时使用的过期模式：`scan`、`sort` 或 `slab` |
+| `tair_hash_expiring_keys` | 所有db中至少含有一个待过期field的TairHash key数量 |
+| `enable_active_expire` | 主动过期定时器开启时为1 |
+| `tair_hash_active_expire_period` | 两次主动过期之间的毫秒数 |
+| `tair_hash_active_expire_keys_per_loop` | 每次主动过期在每个db中检查的key数量（SCAN模式下即SCAN的`COUNT`） |
+| `tair_hash_active_expire_dbs_per_loop` | 每次主动过期访问的db数量 |
+| `tair_hash_active_expire_last_time_msec` / `_max_time_msec` / `_avg_time_msec` | 最近一次、最长和平均一次主动过期的耗时 |
+| `tair_hash_passive_expire_keys_per_loop` | 每次写入时顺带淘汰的field数量上限 |
+| `db: <n>, active_expired_fields: <a>, passive_expired_fields: <p>` | 每个db中已过期的field数量 |
+
+SORT和SLAB模式下，`INFO tairhash` 也会返回这些统计。
 
 ## 事件通知  
 

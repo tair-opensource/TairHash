@@ -478,6 +478,126 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal 0 [r dbsize]
     }
 
+    proc expire_info_field {name} {
+        if {![regexp "$name:(\[^\r\n\]+)" [r exhexpireinfo] -> value]} {
+            fail "exhexpireinfo has no $name"
+        }
+        return $value
+    }
+
+    proc expiring_keys {} {
+        return [expire_info_field tair_hash_expiring_keys]
+    }
+
+    proc scan_calls {} {
+        if {[regexp {cmdstat_scan:calls=([0-9]+)} [r info commandstats] -> calls]} {
+            return $calls
+        }
+        return 0
+    }
+
+    test {Exhexpireinfo reports the expire mode} {
+        assert {[expire_info_field tair_hash_active_expire_mode] in {scan sort slab}}
+    }
+
+    test {Exhexpireinfo counts the keys with expiring fields} {
+        r flushall
+        # Hashes that earlier tests freed on the lazy-free thread stay counted until it frees them.
+        wait_for_condition 50 100 {
+            [expiring_keys] == 0
+        } else {
+            fail "flushed keys are still counted"
+        }
+        r exhset nottl f v
+        assert_equal 0 [expiring_keys]
+
+        r exhset k1 f1 v ex 100
+        r exhset k1 f2 v ex 100
+        r exhset k2 f v px 100000
+        assert_equal 2 [expiring_keys]
+
+        r exhpersist k2 f
+        assert_equal 1 [expiring_keys]
+        r exhset k2 f v ex 100
+        r exhdel k2 f
+        assert_equal 1 [expiring_keys]
+
+        r exhset k3 f v ex 100
+        r del k3
+        assert_equal 1 [expiring_keys]
+
+        r rename k1 k1renamed
+        assert_equal 1 [expiring_keys]
+        r debug reload
+        # The server can free the dataset it replaced on the lazy-free thread, which uncounts it later.
+        wait_for_condition 50 100 {
+            [expiring_keys] == 1
+        } else {
+            fail "reloaded keys are not counted once"
+        }
+
+        r exhset passive f v px 50
+        after 100
+        assert_equal {} [r exhget passive f]
+        assert_equal 1 [expiring_keys]
+
+        r flushall
+        wait_for_condition 50 100 {
+            [expiring_keys] == 0
+        } else {
+            fail "flushed keys are still counted"
+        }
+    }
+
+    test {Exhexpireinfo counts a key freed on a lazy-free thread} {
+        r flushall
+        create_big_tairhash_with_expire big 1000 100
+        assert_equal 1 [expiring_keys]
+        r unlink big
+        wait_for_condition 50 100 {
+            [expiring_keys] == 0
+        } else {
+            fail "unlinked key is still counted"
+        }
+
+        create_big_tairhash_with_expire big 1000 100
+        r flushall async
+        wait_for_condition 50 100 {
+            [expiring_keys] == 0
+        } else {
+            fail "keys flushed asynchronously are still counted"
+        }
+    }
+
+    test {Active expire scans only while a field can expire} {
+        r flushall
+        for {set j 0} {$j < 100} {incr j} {
+            r set plain$j v
+        }
+        r exhset nottl f v
+        r config resetstat
+        # Two active expire periods.
+        after 2100
+        assert_equal 0 [scan_calls]
+
+        r exhset expiring f v px 300
+        wait_for_condition 50 100 {
+            [r exists expiring] == 0
+        } else {
+            fail "expiring was not actively expired"
+        }
+        assert_equal 0 [expiring_keys]
+        if {[expire_info_field tair_hash_active_expire_mode] eq "scan"} {
+            assert {[scan_calls] > 0}
+        } else {
+            assert_equal 0 [scan_calls]
+        }
+
+        r config resetstat
+        after 2100
+        assert_equal 0 [scan_calls]
+    }
+
     test {Rename with active expire} {
         r flushall
         create_big_tairhash_with_expire exk1 10 2
@@ -2708,12 +2828,8 @@ start_server {tags {"tairhash passive-expire"}} {
     test {Passive expiry of fields whose names only the expire index still holds} {
         r select 12
         r flushdb
-        # SLAB mode has no passive expiry. Nothing reports the expire mode, so tell it by the
-        # expire index: only a slab, two arrays of 512 entries, makes a hash with one expiring
-        # field this large.
-        r exhset probe f v EX 1000
-        set passive [expr {[r memory usage probe] < 8000}]
-        r del probe
+        # SLAB mode has no passive expiry.
+        set passive [expr {[expire_info_field tair_hash_active_expire_mode] ne "slab"}]
 
         r exhset k live v
         r exhset k f1 v EX 1000

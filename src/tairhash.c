@@ -56,6 +56,18 @@ m_zskiplist *dbExpireIndex(int dbid) {
 RedisModuleTimerID g_expire_timer_id;
 ExpireAlgorithm g_expire_algorithm;
 
+#if defined(SORT_MODE) || defined(SLAB_MODE)
+unsigned long long expiringKeyCount(void) {
+    unsigned long long keys = 0;
+    for (int i = 0; i < g_expire_algorithm.db_num; i++) {
+        if (g_expire_index[i]) {
+            keys += g_expire_index[i]->length;
+        }
+    }
+    return keys;
+}
+#endif
+
 void _moduleAssert(const char *estr, const char *file, int line) {
     fprintf(stderr, "=== ASSERTION FAILED ===");
     fprintf(stderr, "==> %s:%d '%s' is not true", file, line, estr);
@@ -146,6 +158,7 @@ static void tairhashScanCallback(void *privdata, TairHashField *f) {
 }
 
 static void tairHashTypeReleaseObject(struct tairHashObj *o) {
+    expiringKeyReleased(o);
     ftClear(&o->hash);
     if (o->expire_index) {
 #ifdef SLAB_MODE
@@ -550,6 +563,8 @@ static int keySpaceNotification(RedisModuleCtx *ctx, int type, const char *event
 
 void infoFunc(RedisModuleInfoCtx *ctx, int for_crash_report) {
     RedisModule_InfoAddSection(ctx, "Statistics");
+    RedisModule_InfoAddFieldCString(ctx, "active_expire_mode", TAIRHASH_EXPIRE_MODE_NAME);
+    RedisModule_InfoAddFieldULongLong(ctx, "expiring_keys", expiringKeyCount());
     RedisModule_InfoAddFieldLongLong(ctx, "active_expire_enable", g_expire_algorithm.enable_active_expire);
     RedisModule_InfoAddFieldLongLong(ctx, "active_expire_period", g_expire_algorithm.active_expire_period);
     RedisModule_InfoAddFieldLongLong(ctx, "active_expire_keys_per_loop", g_expire_algorithm.keys_per_active_loop);
@@ -2818,6 +2833,8 @@ int TairHashTypeActiveExpireInfo_RedisCommand(RedisModuleCtx *ctx, RedisModuleSt
         ctx,
         "\r\n"
         "# Active expire statistics\r\n"
+        "tair_hash_active_expire_mode:%s\r\n"
+        "tair_hash_expiring_keys:%llu\r\n"
         "enable_active_expire:%ld\r\n"
         "tair_hash_active_expire_period:%ld\r\n"
         "tair_hash_active_expire_keys_per_loop:%ld\r\n"
@@ -2826,6 +2843,8 @@ int TairHashTypeActiveExpireInfo_RedisCommand(RedisModuleCtx *ctx, RedisModuleSt
         "tair_hash_active_expire_max_time_msec:%ld\r\n"
         "tair_hash_active_expire_avg_time_msec:%ld\r\n"
         "tair_hash_passive_expire_keys_per_loop:%ld\r\n",
+        TAIRHASH_EXPIRE_MODE_NAME,
+        expiringKeyCount(),
         (long)g_expire_algorithm.enable_active_expire,
         (long)g_expire_algorithm.active_expire_period,
         (long)g_expire_algorithm.keys_per_active_loop,

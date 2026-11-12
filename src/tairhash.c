@@ -3315,13 +3315,8 @@ static void aofRewriteState(RedisModuleIO *aof, RedisModuleString *key, tairHash
 
     fieldTableIterator it;
     TairHashField *f;
-    long long now = RedisModule_Milliseconds();
     ftIterInitReadOnly(&it, &o->hash);
     while ((f = ftIterNext(&it)) != NULL) {
-        if (f->expire && now > f->expire) {
-            /* For expired field, we do not REWRITE it. */
-            continue;
-        }
         argv[argc++] = RedisModule_CreateString(NULL, fieldName(f), f->name_len);
         argv[argc++] = RedisModule_CreateString(NULL, fieldValue(f), f->value_len);
         argv[argc++] = RedisModule_CreateStringFromLongLong(NULL, f->version);
@@ -3341,13 +3336,8 @@ static void aofRewriteState(RedisModuleIO *aof, RedisModuleString *key, tairHash
 static void aofRewriteCompat(RedisModuleIO *aof, RedisModuleString *key, tairHashObj *o) {
     fieldTableIterator it;
     TairHashField *f;
-    long long now = RedisModule_Milliseconds();
     ftIterInitReadOnly(&it, &o->hash);
     while ((f = ftIterNext(&it)) != NULL) {
-        if (f->expire && now > f->expire) {
-            /* For expired field, we do not REWRITE it. */
-            continue;
-        }
         switch (fieldStateCommand(f->version, f->expire)) {
         case FIELD_STATE_EXHSETNX:
             RedisModule_EmitAOF(aof, "EXHSETNX", "sbb", key, fieldName(f), (size_t)f->name_len, fieldValue(f), (size_t)f->value_len);
@@ -3364,6 +3354,9 @@ static void aofRewriteCompat(RedisModuleIO *aof, RedisModuleString *key, tairHas
     ftIterRelease(&it);
 }
 
+/* Emits every field, expired or not: the commands logged after the fork apply to the hash as
+ * it was at the fork, where a field that expires while the rewrite runs still exists and may
+ * since have had its TTL extended. Fields that did expire are removed after loading. */
 void TairHashTypeAofRewrite(RedisModuleIO *aof, RedisModuleString *key, void *value) {
     if (g_replication_format == REPLICATION_FORMAT_STATE) {
         aofRewriteState(aof, key, value);

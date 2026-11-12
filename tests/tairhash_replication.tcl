@@ -377,6 +377,68 @@ foreach format {state compat} {
         }
     }
 
+    start_server [list tags {"tairhash replication"} overrides {bind 0.0.0.0}] {
+        # Without active expire a field whose TTL passed stays in the hash until a command
+        # comes across it.
+        r module load $testmodule replication_format $format enable_active_expire 0
+
+        test "AOF rewrite keeps a field that expired but was not removed yet ($format)" {
+            r flushall
+            r config set aof-use-rdb-preamble no
+            r config set appendonly yes
+            waitForBgrewriteaof r
+            r exhset late f v px 100
+            wait_for_condition 50 100 {
+                [r exhlen late noexp] == 0
+            } else {
+                fail "The field did not expire"
+            }
+            assert_equal 1 [r exhlen late]
+            set digest [r debug digest]
+
+            r bgrewriteaof
+            waitForBgrewriteaof r
+            assert_equal ok [s aof_last_bgrewrite_status]
+            r debug loadaof
+            assert_equal 1 [r exhlen late]
+            assert_equal $digest [r debug digest]
+
+            r config set appendonly no
+            r config set aof-use-rdb-preamble yes
+        }
+
+        # rdb-key-save-delay slows down AOF rewrite too from Redis 7.0 on.
+        if {[tairhash_server_at_least 7 0]} {
+            test "A TTL extended while AOF rewrite runs survives a reload ($format)" {
+                r flushall
+                r config set aof-use-rdb-preamble no
+                r config set appendonly yes
+                waitForBgrewriteaof r
+                # The rewrite goes through database 0 first and sleeps after its key, so it gets
+                # to the hash, in database 9, only once the field's first TTL has passed.
+                r select 0
+                r set pad x
+                r select 9
+                r config set rdb-key-save-delay 1500000
+                r exhset slow f v px 1000
+                r bgrewriteaof
+                set extended [r exhpexpire slow f 600000]
+                r config set rdb-key-save-delay 0
+                waitForBgrewriteaof r
+                assert_equal ok [s aof_last_bgrewrite_status]
+                assert_equal 1 $extended
+                set digest [r debug digest]
+                r debug loadaof
+                assert_equal $digest [r debug digest]
+                assert_equal {v 2} [r exhgetwithver slow f]
+                assert {[r exhpttl slow f] > 500000}
+
+                r config set appendonly no
+                r config set aof-use-rdb-preamble yes
+            }
+        }
+    }
+
     start_server [list tags {"tairhash replication repl"} overrides {bind 0.0.0.0}] {
         r module load $testmodule
         set replica [srv 0 client]

@@ -26,7 +26,7 @@ void insert(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
     REDISMODULE_NOT_USED(key);
     if (expire) {
         tairHashEnsureExpireIndex(obj);
-        m_zslInsert(obj->expire_index, expire, takeAndRef(field));
+        m_zslInsert(obj->expire_index, expire, ownString(field));
     }
 }
 
@@ -294,9 +294,10 @@ void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, t
         RedisModule_FreeThreadSafeContext(ctx2);
     } else {
         RedisModuleString *key_dup = RedisModule_CreateStringFromString(NULL, key);
+        /* field may be the expire index's own copy of the name, which deleting the index entry frees. */
         RedisModuleString *field_dup = RedisModule_CreateStringFromString(NULL, field);
         m_zslDelete(obj->expire_index, expire, field_dup, NULL);
-        m_dictDelete(obj->hash, field);
+        m_dictDelete(obj->hash, field_dup);
         RedisModule_Replicate(ctx, "EXHDEL", "ss", key_dup, field_dup);
         notifyFieldSpaceEvent("expired", key_dup, field_dup, dbid);
         RedisModule_FreeString(NULL, key_dup);

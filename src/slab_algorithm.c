@@ -30,7 +30,7 @@ void insert(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
         if (o->expire_index->header->level[0].forward) {
             before_min_score = o->expire_index->header->level[0].forward->expire_min;
         }
-        slab_expireInsert(o->expire_index, takeAndRef(field), expire);
+        slab_expireInsert(o->expire_index, ownString(field), expire);
         after_min_score = o->expire_index->header->level[0].forward->expire_min;
         if (before_min_score > 0) {
             m_zslUpdateScore(dbExpireIndex(dbid), before_min_score, o->key, after_min_score);
@@ -48,7 +48,7 @@ void update(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
         tairhash_zskiplistNode *ln = o->expire_index->header->level[0].forward;
         Module_Assert(ln != NULL);
         before_min_score = ln->expire_min;
-        RedisModuleString *new_field = takeAndRef(field);
+        RedisModuleString *new_field = ownString(field);
         slab_expireUpdate(o->expire_index, field, cur_expire, new_field, new_expire);
         after_min_score = o->expire_index->header->level[0].forward->expire_min;
         m_zslUpdateScore(dbExpireIndex(dbid), before_min_score, o->key, after_min_score);
@@ -161,6 +161,7 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
 
 void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, long long expire, int is_timer) {
     RedisModuleString *key_dup = RedisModule_CreateStringFromString(NULL, key);
+    /* field may be the expire index's own copy of the name, which deleting the index entry frees. */
     RedisModuleString *field_dup = RedisModule_CreateStringFromString(NULL, field);
     if (!is_timer) {
         long long before_min_score = o->expire_index->header->level[0].forward->expire_min;
@@ -172,7 +173,7 @@ void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, t
             m_zslDelete(dbExpireIndex(dbid), before_min_score, key, NULL);
         }
     }
-    m_dictDelete(o->hash, field);
+    m_dictDelete(o->hash, field_dup);
     RedisModule_Replicate(ctx, "EXHDEL", "ss", key_dup, field_dup);
     notifyFieldSpaceEvent("expired", key_dup, field_dup, dbid);
     RedisModule_FreeString(NULL, key_dup);

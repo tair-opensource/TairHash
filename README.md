@@ -27,7 +27,7 @@
 - Do not sort TairHash globally (Smaller memory overhead)
 - Each TairHash will still use a sort index to sort the fields internally (For expiration efficiency)
 - The built-in timer will periodically use the SCAN command to find the TairHash that contains the expired field, and then check the sort index inside the TairHash to eliminate the field
-- All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
+- The sort index holds its own copy of the name of each field that has a TTL; a field without a TTL is not in it
 
 **Supported redis version**: redis >= 5.0
 
@@ -41,7 +41,7 @@
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
 - The first-level uses the smallest ttl in the second-level for sorting, so the main key is globally ordered
 - The built-in timer will periodically scan the first-level index to find out a key that has expired, and then check the secondary index of these keys to eliminate the expired fields. This is the active expire
-- All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
+- The first-level index holds its own copy of each key name, and the second-level index its own copy of the name of each field that has a TTL
 
 **Supported redis version**: redis >= 7.0
 

@@ -28,7 +28,7 @@ void insert(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *
         if (o->expire_index->header->level[0].forward) {
             before_min_score = o->expire_index->header->level[0].forward->score;
         }
-        m_zslInsert(o->expire_index, expire, takeAndRef(field));
+        m_zslInsert(o->expire_index, expire, ownString(field));
         after_min_score = o->expire_index->header->level[0].forward->score;
         if (before_min_score > 0) {
             m_zslUpdateScore(dbExpireIndex(dbid), before_min_score, o->key, after_min_score);
@@ -186,6 +186,7 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *up_key) {
 
 void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, long long expire, int is_timer) {
     RedisModuleString *key_dup = RedisModule_CreateStringFromString(NULL, key);
+    /* field may be the expire index's own copy of the name, which deleting the index entry frees. */
     RedisModuleString *field_dup = RedisModule_CreateStringFromString(NULL, field);
     if (!is_timer) {
         long long before_min_score = o->expire_index->header->level[0].forward->score;
@@ -197,7 +198,7 @@ void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, t
             m_zslDelete(dbExpireIndex(dbid), before_min_score, key, NULL);
         }
     }
-    m_dictDelete(o->hash, field);
+    m_dictDelete(o->hash, field_dup);
     RedisModule_Replicate(ctx, "EXHDEL", "ss", key_dup, field_dup);
     notifyFieldSpaceEvent("expired", key_dup, field_dup, dbid);
     RedisModule_FreeString(NULL, key_dup);

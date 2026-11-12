@@ -27,7 +27,7 @@
 - 不对TairHash进行全局排序（可以节省内存）
 - 每个TairHash内部依然会使用一个排序索引对fields进行排序（加速每个key内部的field查找）
 - 内置定时器会周期使用SCAN命令找到包含过期field的TairHash，然后检查TairHash内部的排序索引，进行field的淘汰
-- 排序中所有的key和field都是指针引用，无内存拷贝，无内存膨胀问题
+- 排序索引为每个设置了过期时间的field保存一份field名的拷贝，没有设置过期时间的field不在索引中
 
 **支持的redis版本**: redis >= 5.0  
 **优点**：可以运行在低版本的redis中（redis >= 5.0 ）      
@@ -39,7 +39,7 @@
 - 使用两级排序索引，第一级对tairhash主key进行排序，第二级针对每个tairhash内部的field进行排序
 - 第一级排序使用第二级排序里最小的ttl进行排序，因此主key是按照ttl全局有序的
 - 内置定时器会周期扫描第一级索引，找出一部分已经过期的key，然后分别再检查这些key的二级索引，进行field的淘汰，也就是active expire
-- 排序中所有的key和field都是指针引用，无内存拷贝，无内存膨胀问题
+- 第一级索引为每个key保存一份key名的拷贝，第二级索引为每个设置了过期时间的field保存一份field名的拷贝
 
 **支持的redis版本**: redis >= 7.0  
 **优点**：过期淘汰效率比较高      

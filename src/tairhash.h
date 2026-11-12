@@ -111,7 +111,7 @@ typedef struct ExpireAlgorithm {
 } ExpireAlgorithm;
 
 void _moduleAssert(const char *estr, const char *file, int line);
-RedisModuleString *takeAndRef(RedisModuleString *str);
+RedisModuleString *ownString(RedisModuleString *str);
 RedisModuleString *expireIndexMember(const tairHashObj *obj);
 void tairHashEnsureExpireIndex(tairHashObj *o);
 int delEmptyTairHashIfNeeded(RedisModuleCtx *ctx, RedisModuleKey *key, RedisModuleString *raw_key, tairHashObj *obj);

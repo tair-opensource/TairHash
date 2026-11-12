@@ -77,9 +77,12 @@ void tairHashValRelease(struct TairHashVal *o) {
     }
 }
 
-RedisModuleString *takeAndRef(RedisModuleString *str) {
-    RedisModule_RetainString(NULL, str);
-    return str;
+/* A copy of str for a TairHash to keep. Client arguments are copied rather than retained: in a
+ * transaction the client holds its arguments until EXEC returns, while a later command of the
+ * transaction can free the hash on the lazyfree thread, and both would update the reference
+ * count of a shared string at once. */
+RedisModuleString *ownString(RedisModuleString *str) {
+    return RedisModule_CreateStringFromString(NULL, str);
 }
 
 /* Members of g_expire_index are the index's own copies of key names, never a retained obj->key.
@@ -1046,9 +1049,9 @@ int TairHashTypeHset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv,
         RedisModule_FreeString(NULL, tair_hash_val->value);
     }
 
-    tair_hash_val->value = takeAndRef(argv[3]);
+    tair_hash_val->value = ownString(argv[3]);
     if (nokey) {
-        m_dictAdd(tair_hash_obj->hash, takeAndRef(skey), tair_hash_val);
+        m_dictAdd(tair_hash_obj->hash, ownString(skey), tair_hash_val);
         RedisModule_ReplyWithLongLong(ctx, 1);
     } else {
         RedisModule_ReplyWithLongLong(ctx, 0);
@@ -1109,8 +1112,8 @@ int TairHashTypeHsetNx_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **arg
         return REDISMODULE_OK;
     }
 
-    tair_hash_val->value = takeAndRef(svalue);
-    m_dictAdd(tair_hash_obj->hash, takeAndRef(skey), tair_hash_val);
+    tair_hash_val->value = ownString(svalue);
+    m_dictAdd(tair_hash_obj->hash, ownString(skey), tair_hash_val);
 
     RedisModule_ReplicateVerbatim(ctx);
     RedisModule_ReplyWithLongLong(ctx, 1);
@@ -1168,10 +1171,10 @@ int TairHashTypeHmset_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv
                 RedisModule_FreeString(NULL, tair_hash_val->value);
             }
         }
-        tair_hash_val->value = takeAndRef(argv[i + 1]);
+        tair_hash_val->value = ownString(argv[i + 1]);
         tair_hash_val->version++;
         if (nokey) {
-            m_dictAdd(tair_hash_obj->hash, takeAndRef(argv[i]), tair_hash_val);
+            m_dictAdd(tair_hash_obj->hash, ownString(argv[i]), tair_hash_val);
         }
     }
 
@@ -1268,7 +1271,7 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
             RedisModule_FreeString(NULL, tair_hash_val->value);
         }
 
-        tair_hash_val->value = takeAndRef(argv[i + 1]);
+        tair_hash_val->value = ownString(argv[i + 1]);
         tair_hash_val->version++;
 
         /* Cannot overflow: the loop above checked it. */
@@ -1281,7 +1284,7 @@ int TairHashTypeHmsetWithOpts_RedisCommand(RedisModuleCtx *ctx, RedisModuleStrin
         tair_hash_val->expire = when;
 
         if (nokey) {
-            m_dictAdd(tair_hash_obj->hash, takeAndRef(argv[i]), tair_hash_val);
+            m_dictAdd(tair_hash_obj->hash, ownString(argv[i]), tair_hash_val);
         }
 
         v[vlen++] = RedisModule_CreateStringFromString(ctx, argv[1]);
@@ -1710,14 +1713,17 @@ int TairHashTypeHincrBy_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **ar
     }
 
     if (nokey) {
-        m_dictAdd(tair_hash_obj->hash, takeAndRef(skey), tair_hash_val);
+        m_dictAdd(tair_hash_obj->hash, ownString(skey), tair_hash_val);
     }
 
+    /* The value is replicated by content, not as the hash's own string: replication holds its
+     * arguments until the outermost command returns, and a later command of a transaction can
+     * free the hash on the lazyfree thread before that. */
     if (milliseconds > 0) {
-        RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], tair_hash_val->value, "abs",
+        RedisModule_Replicate(ctx, "EXHSET", "sslclcl", argv[1], argv[2], cur_val, "abs",
                               tair_hash_val->version, "pxat", (milliseconds + RedisModule_Milliseconds()));
     } else {
-        RedisModule_Replicate(ctx, "EXHSET", "ssscl", argv[1], argv[2], tair_hash_val->value, "abs", tair_hash_val->version);
+        RedisModule_Replicate(ctx, "EXHSET", "sslcl", argv[1], argv[2], cur_val, "abs", tair_hash_val->version);
     }
 
     RedisModule_ReplyWithLongLong(ctx, cur_val);
@@ -1956,14 +1962,15 @@ int TairHashTypeHincrByFloat_RedisCommand(RedisModuleCtx *ctx, RedisModuleString
     }
 
     if (nokey) {
-        m_dictAdd(tair_hash_obj->hash, takeAndRef(skey), tair_hash_val);
+        m_dictAdd(tair_hash_obj->hash, ownString(skey), tair_hash_val);
     }
 
+    /* By content, as in EXHINCRBY. */
     if (milliseconds > 0) {
-        RedisModule_Replicate(ctx, "EXHSET", "sssclcl", argv[1], argv[2], tair_hash_val->value, "abs", tair_hash_val->version, "pxat",
+        RedisModule_Replicate(ctx, "EXHSET", "ssbclcl", argv[1], argv[2], dbuf, (size_t)dlen, "abs", tair_hash_val->version, "pxat",
                               (milliseconds + RedisModule_Milliseconds()));
     } else {
-        RedisModule_Replicate(ctx, "EXHSET", "ssscl", argv[1], argv[2], tair_hash_val->value, "abs", tair_hash_val->version);
+        RedisModule_Replicate(ctx, "EXHSET", "ssbcl", argv[1], argv[2], dbuf, (size_t)dlen, "abs", tair_hash_val->version);
     }
     RedisModule_ReplyWithString(ctx, tair_hash_val->value);
     return REDISMODULE_OK;
@@ -2922,13 +2929,12 @@ void *TairHashTypeRdbLoad(RedisModuleIO *rdb, int encver) {
         TairHashVal *hashv = createTairHashVal();
         hashv->version = version;
         hashv->expire = expire;
-        hashv->value = takeAndRef(value);
-        m_dictAdd(o->hash, takeAndRef(skey), hashv);
+        /* Loaded strings belong to the module already. */
+        hashv->value = value;
+        m_dictAdd(o->hash, skey, hashv);
         if (hashv->expire) {
             g_expire_algorithm.insert(NULL, dbid, NULL, o, skey, hashv->expire);
         }
-        RedisModule_FreeString(NULL, value);
-        RedisModule_FreeString(NULL, skey);
     }
 
     return o;
@@ -3020,8 +3026,8 @@ static size_t stringMallocSize(RedisModuleString *str) {
 }
 
 /* What the hash actually holds in the allocator: object, dict and bucket tables,
- * entries, field and value strings and the expire index. Skiplist members share the
- * dict's field strings and are not counted twice. */
+ * entries, field and value strings and the expire index, which has its own copy of the
+ * name of each field with a TTL. */
 static size_t tairHashMemUsage(const tairHashObj *o) {
     size_t size = allocSize(o, sizeof(*o)) + allocSize(o->hash, sizeof(*o->hash));
     for (int t = 0; t < 2; t++) {
@@ -3045,11 +3051,18 @@ static size_t tairHashMemUsage(const tairHashObj *o) {
         size += allocSize(o->expire_index, sizeof(*o->expire_index));
 #ifdef SLAB_MODE
         for (tairhash_zskiplistNode *x = o->expire_index->header; x != NULL; x = x->level[0].forward) {
-            size += allocSize(x, sizeof(*x)) + (x->slab ? allocSize(x->slab, sizeof(*x->slab)) : 0);
+            size += allocSize(x, sizeof(*x));
+            if (x->slab) {
+                size += allocSize(x->slab, sizeof(*x->slab));
+                for (int i = 0; i < x->slab->num_keys; i++) {
+                    size += stringMallocSize(x->slab->keys[i]);
+                }
+            }
         }
 #else
         for (m_zskiplistNode *x = o->expire_index->header; x != NULL; x = x->level[0].forward) {
-            size += allocSize(x, sizeof(*x));
+            /* The header has no member. */
+            size += allocSize(x, sizeof(*x)) + (x->member ? stringMallocSize(x->member) : 0);
         }
 #endif
     }

@@ -813,26 +813,29 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         }
 
         test {MEMORY USAGE tracks the allocator} {
-            r flushall
-            # Valkey frees FLUSHALL on a background thread by default, which would offset used_memory.
-            wait_for_condition 50 100 {
-                [s lazyfree_pending_objects] == 0
-            } else {
-                fail "FLUSHALL was not freed"
+            # Without and with a TTL on the fields: a field with a TTL is in the expire index as well.
+            foreach ttl {{} {EX 100000}} {
+                r flushall
+                # Valkey frees FLUSHALL on a background thread by default, which would offset used_memory.
+                wait_for_condition 50 100 {
+                    [s lazyfree_pending_objects] == 0
+                } else {
+                    fail "FLUSHALL was not freed"
+                }
+                # Compare growth between two sizes of the hash, so one-off server allocations (such as
+                # the client's query buffer) land on neither side.
+                for {set i 0} {$i < 2000} {incr i} {
+                    r exhset big field:$i [string repeat x 12] {*}$ttl
+                }
+                set used_before [s used_memory]
+                set reported_before [r memory usage big]
+                for {set i 2000} {$i < 4000} {incr i} {
+                    r exhset big field:$i [string repeat x 12] {*}$ttl
+                }
+                set allocated [expr {[s used_memory] - $used_before}]
+                set reported [expr {[r memory usage big] - $reported_before}]
+                assert_lessthan [expr {abs($reported - $allocated)}] [expr {$allocated / 10}]
             }
-            # Compare growth between two sizes of the hash, so one-off server allocations (such as
-            # the client's query buffer) land on neither side.
-            for {set i 0} {$i < 2000} {incr i} {
-                r exhset big field:$i [string repeat x 12]
-            }
-            set used_before [s used_memory]
-            set reported_before [r memory usage big]
-            for {set i 2000} {$i < 4000} {incr i} {
-                r exhset big field:$i [string repeat x 12]
-            }
-            set allocated [expr {[s used_memory] - $used_before}]
-            set reported [expr {[r memory usage big] - $reported_before}]
-            assert_lessthan [expr {abs($reported - $allocated)}] [expr {$allocated / 10}]
         }
     }
 
@@ -2827,6 +2830,32 @@ start_server {tags {"tairhash databases"} overrides {databases 32}} {
             assert_error "*" {r module load $testmodule no_such_option 1}
             assert_equal PONG [r ping]
         }
+    }
+}
+
+start_server {tags {"tairhash lazyfree"} overrides {appendonly yes}} {
+    r module load $testmodule
+
+    test {A hash freed on the lazyfree thread inside a transaction} {
+        # More than 64 fields make UNLINK free the hash on the lazyfree thread while EXEC still
+        # holds the arguments of the writes queued before it and, for the AOF, what they replicate.
+        # A string the hash shared with either is a race on its reference count, which only a
+        # thread sanitizer reports; without one this checks no more than that the sequence works.
+        set args {}
+        for {set i 0} {$i < 100} {incr i} {
+            lappend args f$i v$i 0 100
+        }
+        for {set round 0} {$round < 20} {incr round} {
+            r multi
+            r exhmsetwithopts lk {*}$args
+            r exhset lk extra v EX 100
+            r exhincrby lk count 1
+            r exhincrbyfloat lk ratio 1.5
+            r unlink lk
+            r exec
+        }
+        assert_equal 0 [r exists lk]
+        assert_equal PONG [r ping]
     }
 }
 

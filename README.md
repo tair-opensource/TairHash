@@ -29,7 +29,7 @@
 - The built-in timer will periodically use the SCAN command to find the TairHash that contains the expired field, and then check the sort index inside the TairHash to eliminate the field
 - All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
-**Supported redis version**: redis >= 5.0
+**Supported server versions**: redis >= 5.0, valkey >= 7.2
 
 **Advantages**: can run in the low version of redis (redis >= 5.0)  
 
@@ -43,20 +43,20 @@
 - The built-in timer will periodically scan the first-level index to find out a key that has expired, and then check the secondary index of these keys to eliminate the expired fields. This is the active expire
 - All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
 
-**Supported redis version**: redis >= 7.0
+**Supported server versions**: redis >= 7.0, valkey >= 7.2
 
 **Advantages**: higher efficiency of expire elimination     
 
 **Disadvantages**: More memory consumption  
 
-**Usag**e: cmake with `-DSORT_MODE=yes` option, and recompile
+**Usage**: cmake with `-DSORT_MODE=yes` option, and recompile
 
 ### SLAB_MODE：  
 - Slab mode is a low memory usage (compared with SORT mode), cache-friendly, high-performance expiration algorithm
 - Like SORT mode, keys are globally sorted to ensure that keys that need to be expired can be found faster. Unlike SORT mode, SLAB does not sort the fields inside the key, which saves memory overhead. 
 - The SLAB expiration algorithm uses SIMD instructions (when supported by the hardware) to speed up the search for expired fields
 
-**Supported redis version**: redis >= 7.0  
+**Supported server versions**: redis >= 7.0, valkey >= 7.2  
 
 **Advantages**: Efficient elimination, low memory consumption, and fast access bring new ideas to expiration algorithms   
 
@@ -129,16 +129,38 @@ cd build
 cmake ../ && make -j
 ```
 then the tairhash_module.so library file will be generated in the lib directory
+(`cmake -DTAIRHASH_OUTPUT_DIR=<dir> ../` writes it to another directory).
 
 ```
 ./redis-server --loadmodule /path/to/tairhash_module.so
+./valkey-server --loadmodule /path/to/tairhash_module.so
 ```  
 ## TEST
 
-1. Modify the path in the tairhash.tcl file in the `tests` directory to `set testmodule [file your_path/tairhash_module.so]`
-2. Add the path of the tairhash.tcl file in the `tests` directory to the all_tests of redis test_helper.tcl
-3. run ./runtest --single tairhash
+`tests/run.sh` builds the module and runs the TCL suites in `tests/` inside a Redis or
+Valkey source tree's test framework. CI runs every job through it, so a local run executes
+the same steps as CI. The server tree is cloned and built once under `.deps/` and reused;
+each module variant builds into its own directory under `build/`.
 
+```
+tests/run.sh                                  # every suite, scan mode, against Redis 7.0
+tests/run.sh --mode sort --suite tairhash     # one suite, another expire mode
+tests/run.sh --sanitizer address              # module and server built with ASan
+tests/run.sh --coverage                       # line/function coverage of the module
+tests/run.sh --server-ref 7.2 -- --baseport 25000   # another server branch, extra runtest args
+tests/run.sh --server valkey --server-ref 9.1.3     # against Valkey
+```
+
+Requirements: a C toolchain, CMake 3.10+, git and Tcl 8.5+. On macOS the
+`Exhincrbyfloat*` tests fail because `long double` is 64-bit there; they pass on Linux.
+
+To run a suite by hand instead: replace `your_path` in the suite with the directory of
+`tairhash_module.so`, copy it to `tests/unit/type/` in a Redis or Valkey source tree and
+run `./runtest --single unit/type/<suite>`.
+
+CI runs every suite against Redis 5.0, 6.2, 7.0, 7.2, 7.4 and 8.10 and Valkey 7.2, 8.1 and
+9.1, on x86-64 and arm64. Redis 7.0 runs every expire mode, and SCAN and SORT mode also under
+AddressSanitizer; Redis 8.10 and Valkey 9.1 run SCAN mode under AddressSanitizer too.
 
 ## Client
 

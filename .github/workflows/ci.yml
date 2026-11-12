@@ -2,253 +2,73 @@ name: CI
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
 
-  test-ubuntu-with-redis-5:
-    runs-on: ubuntu-latest
+  test:
+    name: ${{ matrix.server }}-${{ matrix.version }} (${{ matrix.algorithm }}, sanitizer=${{ matrix.sanitizer }}${{ matrix.os && ', arm64' || '' }})
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {server: redis, version: '5.0', algorithm: scan, sanitizer: none}
+          - {server: redis, version: '6.2', algorithm: scan, sanitizer: none}
+          - {server: redis, version: '7.0', algorithm: scan, sanitizer: none, coverage: true}
+          - {server: redis, version: '7.0', algorithm: sort, sanitizer: none, coverage: true}
+          - {server: redis, version: '7.0', algorithm: slab, sanitizer: none, coverage: true}
+          - {server: redis, version: '7.0', algorithm: scan, sanitizer: address}
+          - {server: redis, version: '7.0', algorithm: sort, sanitizer: address}
+          - {server: redis, version: '7.2.17', algorithm: scan, sanitizer: none}
+          - {server: redis, version: '7.4.12', algorithm: scan, sanitizer: none}
+          # SORT and SLAB mode run on Redis 7.0 only: on newer servers they expose expire
+          # index bugs (a key-name refcount race, the AVX2 slab split) that are fixed separately.
+          - {server: redis, version: '8.10.3', algorithm: scan, sanitizer: none}
+          - {server: redis, version: '8.10.3', algorithm: scan, sanitizer: address}
+          - {server: valkey, version: '7.2.15', algorithm: scan, sanitizer: none}
+          - {server: valkey, version: '8.1.11', algorithm: scan, sanitizer: none}
+          - {server: valkey, version: '9.1.3', algorithm: scan, sanitizer: none}
+          - {server: valkey, version: '9.1.3', algorithm: scan, sanitizer: address}
+          # arm64: no AVX2, so SLAB mode runs its scalar path.
+          - {server: redis, version: '7.0', algorithm: slab, sanitizer: none, os: ubuntu-26.04-arm}
+          - {server: valkey, version: '9.1.3', algorithm: scan, sanitizer: none, os: ubuntu-26.04-arm}
+    # Prefixed so the server build does not read them: its Makefile rejects SANITIZER=none.
+    env:
+      MATRIX_SERVER: ${{ matrix.server }}
+      MATRIX_VERSION: ${{ matrix.version }}
+      MATRIX_ALGORITHM: ${{ matrix.algorithm }}
+      MATRIX_SANITIZER: ${{ matrix.sanitizer }}
+      MATRIX_COVERAGE: ${{ matrix.coverage && 'yes' || 'no' }}
     steps:
-    - uses: actions/checkout@v2
-    - name: clone and make redis
+    - uses: actions/checkout@v7
+    - name: install dependencies
       run: |
-       sudo apt-get install git
-       git clone https://github.com/redis/redis
-       cd redis
-       git checkout 5.0
-       make REDIS_CFLAGS='-Werror' BUILD_TLS=yes
-    - name: make tairhash
+        sudo apt-get update
+        packages=(tcl8.6)
+        if [ "$MATRIX_COVERAGE" = yes ]; then
+          packages+=(lcov)
+        fi
+        sudo apt-get install -y "${packages[@]}"
+    - name: build and test
       run: |
-       mkdir build
-       cd build
-       cmake ../
-       make 
-    - name: test
-      run: |
-        sudo apt-get install tcl8.6 tclx
-        work_path=$(pwd)
-        module_path=$work_path/lib
-        sed -e "s#your_path#$module_path#g" tests/tairhash.tcl > redis/tests/unit/type/tairhash.tcl
-        sed -i 's#unit/type/string#unit/type/tairhash#g' redis/tests/test_helper.tcl
-        cd redis
-        ./runtest --stack-logging --single unit/type/tairhash
-
-  test-ubuntu-with-redis-6:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: clone and make redis
-      run: |
-       sudo apt-get install git
-       git clone https://github.com/redis/redis
-       cd redis
-       git checkout 6.2
-       make REDIS_CFLAGS='-Werror' BUILD_TLS=yes
-    - name: make tairhash
-      run: |
-       mkdir build
-       cd build
-       cmake ../
-       make 
-    - name: test
-      run: |
-        sudo apt-get install tcl8.6 tclx
-        work_path=$(pwd)
-        module_path=$work_path/lib
-        sed -e "s#your_path#$module_path#g" tests/tairhash.tcl > redis/tests/unit/type/tairhash.tcl
-        sed -i 's#unit/type/string#unit/type/tairhash#g' redis/tests/test_helper.tcl
-        cd redis
-        ./runtest --stack-logging --single unit/type/tairhash
-
-  test-ubuntu-with-redis-7:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: clone and make redis
-      run: |
-       sudo apt-get install git
-       git clone https://github.com/redis/redis
-       cd redis
-       git checkout 7.0
-       make REDIS_CFLAGS='-Werror' BUILD_TLS=yes
-    - name: Install LCOV
-      run: |
-        sudo apt-get --assume-yes install lcov > /dev/null
-    - name: make tairhash
-      run: |
-       mkdir build
-       cd build
-       cmake ../ -DGCOV_MODE=TRUE
-       make 
-    - name: test
-      run: |
-        sudo apt-get install tcl8.6 tclx
-        work_path=$(pwd)
-        module_path=$work_path/lib
-        sed -e "s#your_path#$module_path#g" tests/tairhash.tcl > redis/tests/unit/type/tairhash.tcl
-        sed -i 's#unit/type/string#unit/type/tairhash#g' redis/tests/test_helper.tcl
-        cd redis
-        ./runtest --stack-logging --single unit/type/tairhash
+        args=(--server "$MATRIX_SERVER" --server-ref "$MATRIX_VERSION" --mode "$MATRIX_ALGORITHM" --clients 1)
+        if [ "$MATRIX_SANITIZER" != none ]; then
+          args+=(--sanitizer "$MATRIX_SANITIZER")
+        fi
+        if [ "$MATRIX_COVERAGE" = yes ]; then
+          args+=(--coverage)
+        fi
+        tests/run.sh "${args[@]}"
     - name: lcov collection
-      run: |
-        cd build
-        lcov -c -d ./ -o cover.info
-    - uses: codecov/codecov-action@v1
+      if: matrix.coverage
+      run: lcov -c -d "build/$MATRIX_ALGORITHM-cov" -o build/cover.info
+    - uses: codecov/codecov-action@v7
+      if: matrix.coverage
       with:
-        file: build/cover.info
+        files: build/cover.info
+        flags: ${{ matrix.algorithm }}
         token: ${{ secrets.CODECOV_TOKEN }}
         verbose: true
-
-  test-ubuntu-with-redis-7-sort-mode:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: clone and make redis
-      run: |
-       sudo apt-get install git
-       git clone https://github.com/redis/redis
-       cd redis
-       git checkout 7.0
-       make REDIS_CFLAGS='-Werror' BUILD_TLS=yes
-    - name: Install LCOV
-      run: |
-        sudo apt-get --assume-yes install lcov > /dev/null
-    - name: make tairhash
-      run: |
-       mkdir build
-       cd build
-       cmake ../ -DSORT_MODE=yes
-       make 
-    - name: test
-      run: |
-        sudo apt-get install tcl8.6 tclx
-        work_path=$(pwd)
-        module_path=$work_path/lib
-        sed -e "s#your_path#$module_path#g" tests/tairhash.tcl > redis/tests/unit/type/tairhash.tcl
-        sed -i 's#unit/type/string#unit/type/tairhash#g' redis/tests/test_helper.tcl
-        cd redis
-        ./runtest --stack-logging --single unit/type/tairhash
-    - name: lcov collection
-      run: |
-        cd build
-        lcov -c -d ./ -o cover.info
-    - uses: codecov/codecov-action@v1
-      with: 
-        file: build/cover.info
-        token: ${{ secrets.CODECOV_TOKEN }}
-        verbose: true
-
-  test-ubuntu-with-redis-7-slab-mode:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: clone and make redis
-      run: |
-       sudo apt-get install git
-       git clone https://github.com/redis/redis
-       cd redis
-       git checkout 7.0
-       make REDIS_CFLAGS='-Werror' BUILD_TLS=yes
-    - name: Install LCOV
-      run: |
-        sudo apt-get --assume-yes install lcov > /dev/null
-    - name: make tairhash
-      run: |
-       mkdir build
-       cd build
-       cmake ../ -DSLAB_MODE=yes
-       make 
-    - name: test
-      run: |
-        sudo apt-get install tcl8.6 tclx
-        work_path=$(pwd)
-        module_path=$work_path/lib
-        sed -e "s#your_path#$module_path#g" tests/tairhash.tcl > redis/tests/unit/type/tairhash.tcl
-        sed -i 's#unit/type/string#unit/type/tairhash#g' redis/tests/test_helper.tcl
-        cd redis
-        ./runtest --stack-logging --single unit/type/tairhash
-    - name: lcov collection
-      run: |
-        cd build
-        lcov -c -d ./ -o cover.info
-    - uses: codecov/codecov-action@v1
-      with: 
-        file: build/cover.info
-        token: ${{ secrets.CODECOV_TOKEN }}
-        verbose: true      
-
-  test-sanitizer-address-scan-mode:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: clone and make redis
-      run: |
-       sudo apt-get install git
-       git clone https://github.com/redis/redis
-       cd redis
-       git checkout 7.0
-       make SANITIZER=address REDIS_CFLAGS='-Werror' BUILD_TLS=yes MALLOC=libc
-    - name: Install LCOV
-      run: |
-        sudo apt-get --assume-yes install lcov > /dev/null
-    - name: make tairhash
-      run: |
-       mkdir build
-       cd build
-       cmake ../ -DSANITIZER_MODE=address
-       make 
-    - name: test
-      run: |
-        sudo apt-get install tcl8.6 tclx
-        work_path=$(pwd)
-        module_path=$work_path/lib
-        sed -e "s#your_path#$module_path#g" tests/tairhash.tcl > redis/tests/unit/type/tairhash.tcl
-        sed -i 's#unit/type/string#unit/type/tairhash#g' redis/tests/test_helper.tcl
-        cd redis
-        ./runtest --stack-logging --single unit/type/tairhash
-    - name: lcov collection
-      run: |
-        cd build
-        lcov -c -d ./ -o cover.info
-    - uses: codecov/codecov-action@v1
-      with: 
-        file: build/cover.info
-        token: ${{ secrets.CODECOV_TOKEN }}
-        verbose: true      
-
-  test-sanitizer-address-sort-mode:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: clone and make redis
-      run: |
-       sudo apt-get install git
-       git clone https://github.com/redis/redis
-       cd redis
-       git checkout 7.0
-       make SANITIZER=address REDIS_CFLAGS='-Werror' BUILD_TLS=yes MALLOC=libc
-    - name: Install LCOV
-      run: |
-        sudo apt-get --assume-yes install lcov > /dev/null
-    - name: make tairhash
-      run: |
-       mkdir build
-       cd build
-       cmake ../ -DSANITIZER_MODE=address -DSORT_MODE=yes
-       make 
-    - name: test
-      run: |
-        sudo apt-get install tcl8.6 tclx
-        work_path=$(pwd)
-        module_path=$work_path/lib
-        sed -e "s#your_path#$module_path#g" tests/tairhash.tcl > redis/tests/unit/type/tairhash.tcl
-        sed -i 's#unit/type/string#unit/type/tairhash#g' redis/tests/test_helper.tcl
-        cd redis
-        ./runtest --stack-logging --single unit/type/tairhash
-    - name: lcov collection
-      run: |
-        cd build
-        lcov -c -d ./ -o cover.info
-    - uses: codecov/codecov-action@v1
-      with: 
-        file: build/cover.info
-        token: ${{ secrets.CODECOV_TOKEN }}
-        verbose: true      

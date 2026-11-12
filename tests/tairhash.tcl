@@ -1,5 +1,12 @@
 set testmodule [file normalize your_path/tairhash_module.so]
 
+# The suite runs under both the Redis and the Valkey test harness; Valkey renamed redis_deferring_client.
+if {[llength [info commands valkey_deferring_client]]} {
+    interp alias {} tairhash_deferring_client {} valkey_deferring_client
+} else {
+    interp alias {} tairhash_deferring_client {} redis_deferring_client
+}
+
 
 start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
     r module load $testmodule
@@ -160,10 +167,11 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         set ret_val [r exhget tairhashkey field]
         assert_equal val2 $ret_val
 
-        after 3000
-
-        set ret_val [r exists tairhashkey]
-        assert_equal 0 $ret_val
+        wait_for_condition 100 50 {
+            [r exists tairhashkey] == 0
+        } else {
+            fail "tairhashkey was not actively expired"
+        }
 
         set ret_val [r exhget tairhashkey field]
         assert_equal "" $ret_val
@@ -188,10 +196,11 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         set ret_val [r exhget tairhashkey field]
         assert_equal val2 $ret_val
 
-        after 2000
-
-        set ret_val [r exists tairhashkey]
-        assert_equal 0 $ret_val
+        wait_for_condition 100 50 {
+            [r exists tairhashkey] == 0
+        } else {
+            fail "tairhashkey was not actively expired"
+        }
 
         set ret_val [r exhget tairhashkey field]
         assert_equal "" $ret_val
@@ -211,8 +220,11 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal 1 [r exhdel tairhashkey field3 ]
         assert_equal 1 [r exhset tairhashkey field3 val EXAT $abtime]
         assert_equal 3 [r exhlen tairhashkey]
-        after 4000
-        assert_equal 0 [r exhlen tairhashkey]
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
     }
 
     test {Exhset/exhget VER/ABS } {
@@ -304,10 +316,11 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         set ret_val [r exhget tairhashkey field1]
         assert_equal "" $ret_val
 
-        after 3000
-
-        set h_len [r exhlen tairhashkey]
-        assert_equal 0 $h_len
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
 
         set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
@@ -379,31 +392,38 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         set ret_val [r exhget tairhashkey field1]
         assert_equal "" $ret_val
 
-        after 3000
-
         r select 0
-        set h_len [r exhlen tairhashkey]
-        assert_equal 0 $h_len
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
 
         set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
 
         r select 9
-        set h_len [r exhlen tairhashkey]
-        assert_equal 0 $h_len
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
 
         set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
 
         r select 15
-        set h_len [r exhlen tairhashkey]
-        assert_equal 0 $h_len
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
 
         set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
     }
 
-    test {Active expire with repeat feilds} {
+    test {Active expire with repeat fields} {
         r select 8
         r del tairhashkey
         r exhset tairhashkey f v ex 1
@@ -412,10 +432,11 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
 
         assert_equal 1 [r exhlen tairhashkey]
 
-        after 2000
-
-        assert_equal 0 [r exhlen tairhashkey]
-        assert_equal 0 [r exists tairhashkey]
+        wait_for_condition 100 50 {
+            [r exists tairhashkey] == 0
+        } else {
+            fail "tairhashkey was not actively expired"
+        }
         set info [r exhexpireinfo]
         assert { [string match "*db: 8, active_expired_fields: 1*" $info] }
     }
@@ -460,8 +481,11 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         r rename exk1 exk1_1
         r rename exk2 exk2_2
 
-        after 3000
-        assert_equal 0 [r dbsize]   
+        wait_for_condition 100 50 {
+            [r dbsize] == 0
+        } else {
+            fail "keys were not actively expired"
+        }
     }
 
     test {Move with active expire} {
@@ -481,10 +505,17 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         r select 9
         assert_equal 2 [r dbsize]
 
-        after 3000
-        assert_equal 0 [r dbsize]  
-        r select 8 
-        assert_equal 0 [r dbsize]  
+        wait_for_condition 100 50 {
+            [r dbsize] == 0
+        } else {
+            fail "keys were not actively expired"
+        }
+        r select 8
+        wait_for_condition 100 50 {
+            [r dbsize] == 0
+        } else {
+            fail "keys were not actively expired"
+        }
     }
 
     test {Active expire rdb} {
@@ -533,24 +564,32 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
-        after 4000
         r select 0
-        set h_len [r exhlen tairhashkey]
-        assert_equal 0 $h_len
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
 
         set ret_val [r exhget tairhashkey field1]
         assert_equal "" $ret_val
 
         r select 9
-        set h_len [r exhlen tairhashkey]
-        assert_equal 0 $h_len
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
 
         set ret_val [r exhget tairhashkey field1]
         assert_equal "" $ret_val
 
         r select 15
-        set h_len [r exhlen tairhashkey]
-        assert_equal 0 $h_len
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
 
         set ret_val [r exhget tairhashkey field1]
         assert_equal "" $ret_val
@@ -628,25 +667,32 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         set ret_val [r exhget tairhashkey field1]
         assert_equal val $ret_val
 
-        after 4000
-
         r select 0
-        set h_len [r exhlen tairhashkey]
-        assert_equal 0 $h_len
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
 
         set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
 
         r select 9
-        set h_len [r exhlen tairhashkey]
-        assert_equal 0 $h_len
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
 
         set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
 
         r select 15
-        set h_len [r exhlen tairhashkey]
-        assert_equal 0 $h_len
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
 
         set ret_val [r exhget tairhashkey field3]
         assert_equal "" $ret_val
@@ -887,8 +933,11 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
 
         assert_equal 1 [r exhincrby tairhashkey field 1 EX 2]
         assert_equal 1 [r exhlen tairhashkey]
-        after 4000
-        assert_equal 0 [r exhlen tairhashkey]
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
     }
 
     test {Exhincrbyfloat with params} {
@@ -929,8 +978,11 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
 
         assert_equal 1 [r exhincrbyfloat tairhashkey field 1 EX 2]
         assert_equal 1 [r exhlen tairhashkey]
-        after 4000
-        assert_equal 0 [r exhlen tairhashkey]
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
     }
 
     test {EXHINCRBY against non existing database key} {
@@ -1217,10 +1269,11 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal 1 [r exhset tairhashkey field val PX 100]
         assert_equal 1 [r exhver tairhashkey field]
 
-        after 2000
-
-        set ret_val [r exists tairhashkey]
-        assert_equal 0 $ret_val
+        wait_for_condition 100 50 {
+            [r exists tairhashkey] == 0
+        } else {
+            fail "tairhashkey was not actively expired"
+        }
 
         assert_equal -1 [r exhver tairhashkey field]
 
@@ -1434,10 +1487,11 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         set ret [r exhget tairhashkey field]
         assert_equal val $ret
 
-        after 3000
-
-        set res [r exists tairhashkey]
-        assert_equal 0 $res "assert fail, tairhash still exist"
+        wait_for_condition 100 50 {
+            [r exists tairhashkey] == 0
+        } else {
+            fail "tairhash still exists"
+        }
     }
 
     test {Exhpersist} {
@@ -1506,8 +1560,11 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
         assert_equal "val1 2" [r exhgetwithver tairhashkey field1]
         assert_equal "val2 2" [r exhgetwithver tairhashkey field2]
 
-        after 3000
-        assert_equal 1 [r exhlen tairhashkey]
+        wait_for_condition 100 50 {
+            [r exhlen tairhashkey] == 1
+        } else {
+            fail "field was not actively expired"
+        }
     }
 
     test {tairhash set ignore version} {
@@ -1682,8 +1739,8 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
        r select 1
        r del exhashkey2
        
-       set rd1 [redis_deferring_client]
-       set rd2 [redis_deferring_client]
+       set rd1 [tairhash_deferring_client]
+       set rd2 [tairhash_deferring_client]
 
        assert_equal {1} [psubscribe $rd1 {tairhash*}]
        assert_equal {1} [psubscribe $rd2 {tairhash@1@exhashkey2*}]
@@ -1909,11 +1966,12 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
                 set ret_val [$slave exhget tairhashkey field1]
                 assert_equal "" $ret_val
 
-                after 3000
-
                 $slave select 0
-                set h_len [$slave exhlen tairhashkey]
-                assert_equal 0 $h_len
+                wait_for_condition 100 50 {
+                    [$slave exhlen tairhashkey] == 0
+                } else {
+                    fail "fields were not actively expired on the replica"
+                }
 
                 set ret_val [$slave exhget tairhashkey field2]
                 assert_equal "" $ret_val
@@ -1922,8 +1980,11 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
                 assert_equal 0 $ret_val
 
                 $slave select 9
-                set h_len [$slave exhlen tairhashkey]
-                assert_equal 0 $h_len
+                wait_for_condition 100 50 {
+                    [$slave exhlen tairhashkey] == 0
+                } else {
+                    fail "fields were not actively expired"
+                }
 
                 set ret_val [$slave exhget tairhashkey field2]
                 assert_equal "" $ret_val
@@ -1932,8 +1993,11 @@ start_server {tags {"tairhash"} overrides {bind 0.0.0.0}} {
                 assert_equal 0 $ret_val
 
                 $slave select 15
-                set h_len [$slave exhlen tairhashkey]
-                assert_equal 0 $h_len
+                wait_for_condition 100 50 {
+                    [$slave exhlen tairhashkey] == 0
+                } else {
+                    fail "fields were not actively expired"
+                }
 
                 set ret_val [$slave exhget tairhashkey field2]
                 assert_equal "" $ret_val
@@ -2186,9 +2250,11 @@ start_server {tags {"slab_bug_reproduce"}} {
         r exhset $key field2 val PX 2
         r exhset $key field3 val EX 1
 
-        after 3000
-
-        assert_equal 0 [r exhlen $key]
+        wait_for_condition 100 50 {
+            [r exhlen $key] == 0
+        } else {
+            fail "fields were not actively expired"
+        }
         assert_equal "" [r exhget $key field1]
         assert_equal "" [r exhget $key field2]
         assert_equal "" [r exhget $key field3]

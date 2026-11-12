@@ -22,12 +22,26 @@
 - Support efficient active expiration (SCAN mode, SORT mode and SLAB mode) and passivity expiration for field
 - Support field expired event notification (based on pubsub)
 
+## Memory
+
+Each field is one allocation holding its name, value, version and TTL, chained directly into
+the hash table. A key of 30 fields with 8-byte names and values takes about 1.9KB in all
+(`bench/profile.sh`, Redis 7.0, jemalloc), against about 3.9KB with one dict entry, value
+struct and two string objects per field. The expire index is allocated only once a field of
+the key gets a TTL; allocated with every key, it took the same key to about 5.2KB.
+
+`MEMORY USAGE` reports what the allocator holds for a key: the hash with its fields, and
+the key's own expire index with its copies of the names of expiring fields. It does not
+count the key's entry in the per-database expire index of SORT_MODE and SLAB_MODE, a
+skiplist node and a copy of the key name (about 130 bytes for a short name).
+
 ## Active expiration
 ### SCAN_MODE(default):
 - Do not sort TairHash globally (Smaller memory overhead)
 - Each TairHash will still use a sort index to sort the fields internally (For expiration efficiency)
 - The built-in timer will periodically use the SCAN command to find the TairHash that contains the expired field, and then check the sort index inside the TairHash to eliminate the field
-- All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
+- A scan opens every key it visits, whatever its type, so the timer skips it while no TairHash has a field with a TTL
+- The sort index holds its own copy of the name of each field that has a TTL; a field without a TTL is not in it
 
 **Supported redis version**: redis >= 5.0
 
@@ -41,7 +55,7 @@
 - Use a two-level sort index, the first level sorts the main key of tairhash, and the second level sorts the fields inside each tairhash
 - The first-level uses the smallest ttl in the second-level for sorting, so the main key is globally ordered
 - The built-in timer will periodically scan the first-level index to find out a key that has expired, and then check the secondary index of these keys to eliminate the expired fields. This is the active expire
-- All keys and fields in the sorting index are pointer references, no memory copy, no memory expansion problem
+- The first-level index holds its own copy of each key name, and the second-level index its own copy of the name of each field that has a TTL
 
 **Supported redis version**: redis >= 7.0
 
@@ -67,6 +81,23 @@
 ## Passivity expiration  
 - Every time you read or write a field, it will also trigger the expiration of the field itself  
 - Every time you write a field, tairhash also checks whether other fields (may belong to other keys) are expired (currently up to 3 at a time), because fields are sorted by TTL, so this check will be very efficient (Note: SLAB_MODE does not support this feature)
+
+## Expiration statistics
+`EXHEXPIREINFO` reports how expiration is configured and what it has done:
+
+| Field | Meaning |
+|---|---|
+| `tair_hash_active_expire_mode` | Expire mode the module was built with: `scan`, `sort` or `slab` |
+| `tair_hash_expiring_keys` | TairHash keys, across all databases, with at least one field waiting to expire |
+| `enable_active_expire` | 1 when the active expire timer runs |
+| `tair_hash_active_expire_period` | Milliseconds between active expire passes |
+| `tair_hash_active_expire_keys_per_loop` | Keys a pass examines in each database (SCAN mode: the SCAN `COUNT`) |
+| `tair_hash_active_expire_dbs_per_loop` | Databases a pass visits |
+| `tair_hash_active_expire_last_time_msec` / `_max_time_msec` / `_avg_time_msec` | Duration of the last, longest and average pass |
+| `tair_hash_passive_expire_keys_per_loop` | Most fields a write expires along the way |
+| `db: <n>, active_expired_fields: <a>, passive_expired_fields: <p>` | Fields expired in each database |
+
+SORT and SLAB builds also report these in `INFO tairhash`.
 
 
 ## Event notification   
@@ -129,6 +160,16 @@ cd build
 cmake ../ && make -j
 ```
 then the tairhash_module.so library file will be generated in the lib directory
+
+Build options (`cmake -D<option>=ON ../`):
+
+| Option | Default | Description |
+|---|---|---|
+| `SORT_MODE` / `SLAB_MODE` | `OFF` | Active expire algorithm (default: SCAN mode) |
+| `TAIRHASH_NATIVE_ARCH` | `OFF` | Optimize for the build host's CPU (`-march=native`). Only for a library built on the host that runs it: a binary built this way can crash with SIGILL on another CPU, for example a Docker image built on a CI runner. SLAB mode picks its AVX2 path at runtime without it. |
+| `TAIRHASH_LTO` | `OFF` | Link-time optimization |
+| `SANITIZER_MODE` | unset | `address`, `undefined` or `thread` |
+| `GCOV_MODE` | `OFF` | Coverage instrumentation |
 
 ```
 ./redis-server --loadmodule /path/to/tairhash_module.so

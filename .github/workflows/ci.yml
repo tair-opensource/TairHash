@@ -19,7 +19,7 @@ jobs:
       run: |
        mkdir build
        cd build
-       cmake ../
+       cmake ../ -DTAIRHASH_EXPIRE_MODE=scan
        make 
     - name: test
       run: |
@@ -46,7 +46,7 @@ jobs:
       run: |
        mkdir build
        cd build
-       cmake ../
+       cmake ../ -DTAIRHASH_EXPIRE_MODE=scan
        make 
     - name: test
       run: |
@@ -76,7 +76,7 @@ jobs:
       run: |
        mkdir build
        cd build
-       cmake ../ -DGCOV_MODE=TRUE
+       cmake ../ -DGCOV_MODE=TRUE -DTAIRHASH_EXPIRE_MODE=scan
        make 
     - name: test
       run: |
@@ -115,7 +115,7 @@ jobs:
       run: |
        mkdir build
        cd build
-       cmake ../ -DSORT_MODE=yes
+       cmake ../ -DTAIRHASH_EXPIRE_MODE=sort
        make 
     - name: test
       run: |
@@ -154,7 +154,7 @@ jobs:
       run: |
        mkdir build
        cd build
-       cmake ../ -DSLAB_MODE=yes
+       cmake ../ -DTAIRHASH_EXPIRE_MODE=slab
        make 
     - name: test
       run: |
@@ -193,7 +193,7 @@ jobs:
       run: |
        mkdir build
        cd build
-       cmake ../ -DSANITIZER_MODE=address
+       cmake ../ -DSANITIZER_MODE=address -DTAIRHASH_EXPIRE_MODE=scan
        make 
     - name: test
       run: |
@@ -232,7 +232,7 @@ jobs:
       run: |
        mkdir build
        cd build
-       cmake ../ -DSANITIZER_MODE=address -DSORT_MODE=yes
+       cmake ../ -DSANITIZER_MODE=address -DTAIRHASH_EXPIRE_MODE=sort
        make 
     - name: test
       run: |

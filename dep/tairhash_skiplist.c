@@ -195,7 +195,8 @@ tairhash_zskiplistNode *tairhash_zslUpdateNode(tairhash_zskiplist *zsl, RedisMod
 }
 
 /* Delete all the elements with rank between start and end from the tairhash_skiplist.
- * Start and end are inclusive. Note that start and end need to be 1-based */
+ * Start and end are inclusive. Note that start and end need to be 1-based.
+ * Unlike tairhash_zslDelete, whose callers keep or move the node's slab, this discards the slabs too. */
 unsigned int tairhash_zslDeleteRangeByRank(tairhash_zskiplist *zsl, unsigned int start, unsigned int end) {
     tairhash_zskiplistNode *update[TAIRHASH_ZSKIPLIST_MAXLEVEL], *x;
     unsigned long traversed = 0, removed = 0;
@@ -215,6 +216,8 @@ unsigned int tairhash_zslDeleteRangeByRank(tairhash_zskiplist *zsl, unsigned int
     while (x && traversed <= end) {
         tairhash_zskiplistNode *next = x->level[0].forward;
         tairhash_zslDeleteNode(zsl, x, update);
+        if (x->slab != NULL)
+            slab_delete(x->slab);
         tairhash_zslFreeNode(x);
         removed++;
         traversed++;

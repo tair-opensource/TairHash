@@ -189,7 +189,7 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *up_key) {
     m_listRelease(keys);
 }
 
-void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, long long expire, int is_timer) {
+int deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, long long expire, int is_timer) {
     RedisModuleString *key_dup = RedisModule_CreateStringFromString(NULL, key);
     /* field may be the expire index's own copy of the name, which deleting the index entry frees. */
     RedisModuleString *field_dup = RedisModule_CreateStringFromString(NULL, field);
@@ -208,6 +208,7 @@ void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, t
     notifyFieldSpaceEvent("expired", key_dup, field_dup, dbid);
     RedisModule_FreeString(NULL, key_dup);
     RedisModule_FreeString(NULL, field_dup);
+    return 1;
 }
 
 #endif

@@ -112,16 +112,35 @@ void activeExpire(RedisModuleCtx *ctx, int dbid, uint64_t keys_per_loop) {
                     break;
             }
 
+            int kept = 0;
             for (j = 0; j < timeout_num; j++) {
                 if (ontime_num == 0) {
                     timeout_index = j;
                 } else {
                     timeout_index = timeout_indices[j];
                 }
-                fieldExpireIfNeeded(ctx, dbid, key, tair_hash_obj, ln2->slab->keys[timeout_index], 1);
-                g_expire_algorithm.stat_active_expired_field[dbid]++;
-                start_index++;
-                expire_keys_per_loop--;
+                if (fieldExpireIfNeeded(ctx, dbid, key, tair_hash_obj, ln2->slab->keys[timeout_index], 1)) {
+                    g_expire_algorithm.stat_active_expired_field[dbid]++;
+                    start_index++;
+                    expire_keys_per_loop--;
+                } else {
+                    /* Still in the hash, so it stays in the slab. timeout_indices is read from j on,
+                     * which leaves its start free to collect these. */
+                    timeout_indices[kept++] = timeout_index;
+                }
+            }
+            if (kept) {
+                /* Merge them, from the back, into the ascending indices the slab keeps. */
+                int from = ontime_num - 1, to = ontime_num + kept - 1;
+                for (j = kept - 1; j >= 0; to--) {
+                    if (from >= 0 && ontime_indices[from] > timeout_indices[j]) {
+                        ontime_indices[to] = ontime_indices[from--];
+                    } else {
+                        ontime_indices[to] = timeout_indices[j--];
+                    }
+                }
+                ontime_num += kept;
+                timeout_num -= kept;
             }
 
             if (ontime_num == 0) {
@@ -163,7 +182,7 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
     /* Not support. */
 }
 
-void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, long long expire, int is_timer) {
+int deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, long long expire, int is_timer) {
     RedisModuleString *key_dup = RedisModule_CreateStringFromString(NULL, key);
     /* field may be the expire index's own copy of the name, which deleting the index entry frees. */
     RedisModuleString *field_dup = RedisModule_CreateStringFromString(NULL, field);
@@ -182,6 +201,7 @@ void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, t
     notifyFieldSpaceEvent("expired", key_dup, field_dup, dbid);
     RedisModule_FreeString(NULL, key_dup);
     RedisModule_FreeString(NULL, field_dup);
+    return 1;
 }
 
 #endif

@@ -281,7 +281,7 @@ void passiveExpire(RedisModuleCtx *ctx, int dbid, RedisModuleString *key) {
     m_listRelease(keys);
 }
 
-void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long expire, int is_timer) {
+int deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *obj, RedisModuleString *field, long long expire, int is_timer) {
     if (is_timer) {
         /* See bugfix: https://github.com/redis/redis/pull/8617
                        https://github.com/redis/redis/pull/8097
@@ -289,12 +289,18 @@ void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, t
         */
         RedisModuleCtx *ctx2 = RedisModule_GetThreadSafeContext(NULL);
         RedisModule_SelectDb(ctx2, dbid);
-        notifyFieldSpaceEvent("expired", key, field, dbid);
+        /* The server can refuse the call, as a cluster node does while the cluster is down or when
+         * it does not serve the key's slot. The field is then still in the hash. */
         RedisModuleCallReply *reply = RedisModule_Call(ctx2, "EXHDELREPL", "ss!", key, field);
+        int deleted = reply != NULL && RedisModule_CallReplyType(reply) == REDISMODULE_REPLY_INTEGER && RedisModule_CallReplyInteger(reply) == 1;
         if (reply != NULL) {
             RedisModule_FreeCallReply(reply);
         }
+        if (deleted) {
+            notifyFieldSpaceEvent("expired", key, field, dbid);
+        }
         RedisModule_FreeThreadSafeContext(ctx2);
+        return deleted;
     } else {
         RedisModuleString *key_dup = RedisModule_CreateStringFromString(NULL, key);
         /* field may be the expire index's own copy of the name, which deleting the index entry frees. */
@@ -305,6 +311,7 @@ void deleteAndPropagate(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, t
         notifyFieldSpaceEvent("expired", key_dup, field_dup, dbid);
         RedisModule_FreeString(NULL, key_dup);
         RedisModule_FreeString(NULL, field_dup);
+        return 1;
     }
 }
 

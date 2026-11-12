@@ -313,6 +313,10 @@ restart:
     }
 }
 
+/* Expires `field` of o if its TTL has passed and returns whether it has: 1 for a field that was
+ * deleted, and also for one that is only hidden because nothing may be deleted here (see
+ * isReadOnlyStatus). A caller that passes is_timer takes out of the expire index what it gets 1
+ * for, so for it 1 means deleted and nothing else. */
 int fieldExpireIfNeeded(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, tairHashObj *o, RedisModuleString *field, int is_timer) {
     TairHashVal *tair_hash_val = m_dictFetchValue(o->hash, field);
     if (tair_hash_val == NULL) {
@@ -326,15 +330,14 @@ int fieldExpireIfNeeded(RedisModuleCtx *ctx, int dbid, RedisModuleString *key, t
 
     long long now = RedisModule_Milliseconds();
     if (isReadOnlyStatus(ctx)) {
-        return now > when;
+        return is_timer ? 0 : now > when;
     }
 
     if (now < when) {
         return 0;
     }
 
-    g_expire_algorithm.deleteAndPropagate(ctx, dbid, key, o, field, when, is_timer);
-    return 1;
+    return g_expire_algorithm.deleteAndPropagate(ctx, dbid, key, o, field, when, is_timer);
 }
 
 #if defined(SORT_MODE) || defined(SLAB_MODE)
